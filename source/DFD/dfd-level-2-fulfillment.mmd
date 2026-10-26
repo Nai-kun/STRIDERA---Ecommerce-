@@ -1,0 +1,30 @@
+flowchart TB
+  ADM["Administrator"]
+  CUS["Customer"]
+  SHP["Shipping Provider"]
+  EML["Email / Notification Service"]
+
+  P51("5.1 Retrieve<br/>eligible order")
+  P52("5.2 Prepare<br/>shipment")
+  P53("5.3 Submit shipment request<br/>(provider or manual)")
+  P54("5.4 Save tracking and<br/>update shipment status")
+  P55("5.5 Notify customer")
+
+  D5[("D5 Orders and Items")]
+  D7[("D7 Shipments and Tracking")]
+
+  ADM -->|"fulfill order action"| P51
+  D5 -->|"PAID, unshipped orders"| P51
+  P51 -->|"order and address snapshot"| P52
+  P52 -->|"shipment details, shipping fee"| P53
+  P53 -->|"shipment request"| SHP
+  SHP -->|"tracking number, status"| P53
+  P53 -.->|"FAILURE: provider error, fall back to manual entry"| ADM
+  P53 -->|"tracking reference"| P54
+  P54 -->|"shipment record"| D7
+  P54 -->|"shipping_status update"| D5
+  P54 -->|"status change"| P55
+  P55 -->|"notification request"| EML
+  EML -->|"delivery status"| P55
+  EML -.->|"FAILURE: send failed, logged and retried"| P55
+  P55 -->|"tracking status"| CUS

@@ -1,0 +1,25 @@
+flowchart TB
+  ADM["Administrator"]
+
+  P61("6.1 Receive<br/>stock update")
+  P62("6.2 Validate authorized<br/>administrator")
+  P63("6.3 Update variant-level<br/>inventory")
+  P64("6.4 Record stock<br/>movement")
+  P65("6.5 Check availability")
+  P66("6.6 Return updated<br/>inventory status")
+
+  D1[("D1 Users (roles)")]
+  D3[("D3 Inventory")]
+  D10[("D10 Audit Logs and Stock Movements")]
+
+  ADM -->|"variant ID, new quantity, reason"| P61
+  P61 -->|"update request"| P62
+  D1 -->|"role and account status"| P62
+  P62 -.->|"FAILURE: unauthorized"| ADM
+  P62 -->|"authorized request"| P63
+  P63 -->|"updated stock (transactional)"| D3
+  P63 -->|"change details"| P64
+  P64 -->|"movement and audit entry"| D10
+  D3 -->|"current stock"| P65
+  P65 -->|"in-stock / low / out-of-stock"| P66
+  P66 -->|"inventory status"| ADM

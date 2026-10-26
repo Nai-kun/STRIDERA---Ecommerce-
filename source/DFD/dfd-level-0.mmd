@@ -1,0 +1,23 @@
+flowchart LR
+  CUS["Customer"]
+  ADM["Administrator"]
+  PAY["Payment Gateway"]
+  SHP["Shipping Provider"]
+  EML["Email / Notification Service"]
+
+  P0(("0<br/>Shoe E-Commerce<br/>System"))
+
+  CUS -->|"account details, search/filters, cart actions, checkout info, payment choice"| P0
+  P0 -->|"catalog results, cart totals, order confirmation, tracking status"| CUS
+
+  ADM -->|"product/inventory updates, promo rules, order and shipment actions"| P0
+  P0 -->|"orders, payment status, sales and stock reports"| ADM
+
+  P0 -->|"payment session request (amount, order ref)"| PAY
+  PAY -->|"payment URL/QR, signed webhook result"| P0
+
+  P0 -->|"shipment request"| SHP
+  SHP -->|"tracking number, shipment status"| P0
+
+  P0 -->|"notification request"| EML
+  EML -->|"delivery status"| P0
