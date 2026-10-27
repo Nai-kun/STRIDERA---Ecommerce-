@@ -98,4 +98,4 @@ function setTokenCookie(res, token) {
   });
 }
 
-module.exports = { authenticate, optionalAuth, requireAdmin, generateToken, setTokenCookie };
+module.exports = { authenticate, optionalAuth, requireAdmin, isAdmin: requireAdmin, generateToken, setTokenCookie };
