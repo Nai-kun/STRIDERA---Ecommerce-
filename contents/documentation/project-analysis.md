@@ -115,41 +115,42 @@ Build a fully functional, motion-driven shoe e-commerce website for the **STRIDE
 
 | Req ID | Requirement | Source | Classification | Component | Status | Test Ref |
 |--------|------------|--------|---------------|-----------|--------|----------|
-| R-001 | Product gallery by category | IPT Brief (Must) | Functional | Frontend: Shop page | Not Started | T-001 |
-| R-002 | Attribute selectors (size, color) | IPT Brief (Must) | Functional | Frontend: PDP | Not Started | T-002 |
-| R-003 | Shopping cart with totals | IPT Brief (Must) | Functional | Frontend + Backend: Cart | Not Started | T-003 |
-| R-004 | E-wallet API call (PayMongo) | IPT Brief (Must) | Functional | Backend: Payment service | Not Started | T-004 |
-| R-005 | Order status confirmation | IPT Brief (Must) | Functional | Backend + Frontend: Orders | Not Started | T-005 |
-| R-006 | Out-of-stock disabling | IPT Brief (Should) | Functional | Frontend: PDP variants | Not Started | T-006 |
-| R-007 | Demo fallback (Simulate Payment) | IPT Brief (Should) | Functional | Backend: Payment service | Not Started | T-007 |
-| R-008 | User accounts (register/login) | IPT Brief (Should) | Functional | Backend: Auth | Not Started | T-008 |
-| R-009 | Admin order dashboard | IPT Brief (Should) | Functional | Frontend: Admin | Not Started | T-009 |
-| R-010 | Search functionality | IPT Brief (Could) | Functional | Backend + Frontend: Search | Not Started | T-010 |
-| R-011 | Homepage with hero + sections | Skill Spec §5 | Functional | Frontend: Homepage | Not Started | T-011 |
-| R-012 | Filters (audience, type, size, color, price) | Skill Spec §5 | Functional | Frontend + Backend: Shop | Not Started | T-012 |
-| R-013 | Per-variant stock tracking | Skill Spec §6 | Functional | Backend: Inventory | Not Started | T-013 |
-| R-014 | Server-side cart revalidation | Skill Spec §5 | Security | Backend: Cart service | Not Started | T-014 |
-| R-015 | Server-verified payment status | Skill Spec §8 | Security | Backend: Payment webhook | Not Started | T-015 |
-| R-016 | Multi-step checkout | Skill Spec §5 | Functional | Frontend: Checkout | Not Started | T-016 |
-| R-017 | Guest checkout | Skill Spec §5 | Functional | Frontend + Backend: Checkout | Not Started | T-017 |
-| R-018 | Customer account pages | Skill Spec §5 | Functional | Frontend: Account | Not Started | T-018 |
-| R-019 | Admin product CRUD | Skill Spec §5 | Functional | Frontend + Backend: Admin | Not Started | T-019 |
-| R-020 | Admin inventory management | Skill Spec §5 | Functional | Backend: Admin inventory | Not Started | T-020 |
-| R-021 | Basic promotions/promo codes | Skill Spec §5 (Conflicting resolved) | Functional | Backend: Promo service | Not Started | T-021 |
-| R-022 | Manual fulfillment workflow | Skill Spec §8 | Functional | Backend: Shipment | Not Started | T-022 |
-| R-023 | Responsive design (desktop/tablet/mobile) | Skill Spec §7 | Non-Functional | Frontend: All pages | Not Started | T-023 |
-| R-024 | Motion/animations (purposeful) | Skill Spec §7 | Non-Functional | Frontend: CSS/JS | Not Started | T-024 |
-| R-025 | prefers-reduced-motion support | Skill Spec §7 | Non-Functional | Frontend: CSS | Not Started | T-025 |
-| R-026 | Argon2 password hashing | Skill Spec §8 | Security | Backend: Auth | Not Started | T-026 |
-| R-027 | CSRF protection | Skill Spec §8 | Security | Backend: Middleware | Not Started | T-027 |
-| R-028 | Rate limiting | Skill Spec §8 | Security | Backend: Middleware | Not Started | T-028 |
-| R-029 | Audit logging for admin actions | Skill Spec §8 | Security | Backend: Audit service | Not Started | T-029 |
-| R-030 | DFD L0, L1, L2 diagrams | Skill Spec §4 | Documentation | contents/diagrams/ | ✅ Complete | N/A |
-| R-031 | ERD matching schema | Skill Spec §4 | Documentation | contents/diagrams/erd.mmd | Not Started | N/A |
-| R-032 | Source inventory | Skill Spec §4 | Documentation | contents/documentation/ | ✅ Complete | N/A |
-| R-033 | Assumptions and gaps | Skill Spec §4 | Documentation | contents/documentation/ | ✅ Complete | N/A |
-| R-034 | Money as DECIMAL/integer (no floats) | Skill Spec §6 | Data Integrity | Backend + DB | Not Started | T-030 |
-| R-035 | Idempotent payment processing | Skill Spec §8 | Data Integrity | Backend: Payment | Not Started | T-031 |
-| R-036 | Wishlist | IPT Brief (Could) / Skill (Recommended) | Functional | Frontend + Backend | Not Started | T-032 |
-| R-037 | Basic sales/inventory reports | Skill Spec §5 | Functional | Backend: Admin reports | Not Started | T-033 |
-| R-038 | Shareable URL query params for filters | Skill Spec §5 | Functional | Frontend: Shop | Not Started | T-034 |
+| R-001 | Product gallery by category | IPT Brief (Must) | Functional | Frontend: Shop page | ✅ Complete | PDP/Shop Visual |
+| R-002 | Attribute selectors (size, color) | IPT Brief (Must) | Functional | Frontend: PDP | ✅ Complete | PDP Interactive |
+| R-003 | Shopping cart with totals | IPT Brief (Must) | Functional | Frontend + Backend: Cart | ✅ Complete | Test 1.1 |
+| R-004 | E-wallet API call (PayMongo) | IPT Brief (Must) | Functional | Backend: Payment service | ✅ Complete | Test 1.9, 2.7 |
+| R-005 | Order status confirmation | IPT Brief (Must) | Functional | Backend + Frontend: Orders | ✅ Complete | Test 1.7, 2.6 |
+| R-006 | Out-of-stock disabling | IPT Brief (Should) | Functional | Frontend: PDP variants | ✅ Complete | PDP Variant Matrix |
+| R-007 | Demo fallback (Simulate Payment) | IPT Brief (Should) | Functional | Backend: Payment service | ✅ Complete | Test 2.4, 2.5, 2.6 |
+| R-008 | User accounts (register/login) | IPT Brief (Should) | Functional | Backend: Auth | ✅ Complete | Test 2.9 |
+| R-009 | Admin order dashboard | IPT Brief (Should) | Functional | Frontend: Admin | ✅ Complete | Test 2.1, 2.2, 2.3 |
+| R-010 | Search functionality | IPT Brief (Could) | Functional | Backend + Frontend: Search | ✅ Complete | Product Query |
+| R-011 | Homepage with hero + sections | Skill Spec §5 | Functional | Frontend: Homepage | ✅ Complete | UI Inspection |
+| R-012 | Filters (audience, type, size, color, price) | Skill Spec §5 | Functional | Frontend + Backend: Shop | ✅ Complete | Shop Query |
+| R-013 | Per-variant stock tracking | Skill Spec §6 | Functional | Backend: Inventory | ✅ Complete | Test 1.7 |
+| R-014 | Server-side cart revalidation | Skill Spec §5 | Security | Backend: Cart service | ✅ Complete | Test 1.1, 1.7 |
+| R-015 | Server-verified payment status | Skill Spec §8 | Security | Backend: Payment webhook | ✅ Complete | Test 2.7, 2.8 |
+| R-016 | Multi-step checkout | Skill Spec §5 | Functional | Frontend: Checkout | ✅ Complete | Checkout Flow |
+| R-017 | Guest checkout | Skill Spec §5 | Functional | Frontend + Backend: Checkout | ✅ Complete | Test 1.8 |
+| R-018 | Customer account pages | Skill Spec §5 | Functional | Frontend: Account | ✅ Complete | Account Pages |
+| R-019 | Admin product CRUD | Skill Spec §5 | Functional | Frontend + Backend: Admin | ✅ Complete | Admin Routes |
+| R-020 | Admin inventory management | Skill Spec §5 | Functional | Backend: Admin inventory | ✅ Complete | Stock Update |
+| R-021 | Basic promotions/promo codes | Skill Spec §5 (Conflicting resolved) | Functional | Backend: Promo service | ✅ Complete | Test 1.2, 1.3, 1.4, 1.5, 1.6 |
+| R-022 | Manual fulfillment workflow | Skill Spec §8 | Functional | Backend: Shipment | ✅ Complete | Shipment Routes |
+| R-023 | Responsive design (desktop/tablet/mobile) | Skill Spec §7 | Non-Functional | Frontend: All pages | ✅ Complete | CSS Breakpoints |
+| R-024 | Motion/animations (purposeful) | Skill Spec §7 | Non-Functional | Frontend: CSS/JS | ✅ Complete | Design System |
+| R-025 | prefers-reduced-motion support | Skill Spec §7 | Non-Functional | Frontend: CSS | ✅ Complete | globals.css Media Query |
+| R-026 | Argon2 password hashing | Skill Spec §8 | Security | Backend: Auth | ✅ Complete | Auth Controller |
+| R-027 | CSRF protection | Skill Spec §8 | Security | Backend: Middleware | ✅ Complete | CORS + Origin Guards |
+| R-028 | Rate limiting | Skill Spec §8 | Security | Backend: Middleware | ✅ Complete | Login Limiter |
+| R-029 | Audit logging for admin actions | Skill Spec §8 | Security | Backend: Audit service | ✅ Complete | Test 2.6 |
+| R-030 | DFD L0, L1, L2 diagrams | Skill Spec §4 | Documentation | contents/diagrams/ | ✅ Complete | Verified in diagrams/ |
+| R-031 | ERD matching schema | Skill Spec §4 | Documentation | contents/diagrams/erd.mmd | ✅ Complete | Verified in erd.mmd |
+| R-032 | Source inventory | Skill Spec §4 | Documentation | contents/documentation/ | ✅ Complete | Verified in docs |
+| R-033 | Assumptions and gaps | Skill Spec §4 | Documentation | contents/documentation/ | ✅ Complete | Verified in docs |
+| R-034 | Money as DECIMAL/integer (no floats) | Skill Spec §6 | Data Integrity | Backend + DB | ✅ Complete | Test 1.1, 1.2, 1.3 |
+| R-035 | Idempotent payment processing | Skill Spec §8 | Data Integrity | Backend: Payment | ✅ Complete | Test 1.9, 2.7 |
+| R-036 | Wishlist | IPT Brief (Could) / Skill (Recommended) | Functional | Frontend + Backend | ✅ Complete | Wishlist Routes |
+| R-037 | Basic sales/inventory reports | Skill Spec §5 | Functional | Backend: Admin reports | ✅ Complete | Admin Reports Route |
+| R-038 | Shareable URL query params for filters | Skill Spec §5 | Functional | Frontend: Shop | ✅ Complete | Shop useSearchParams |
+
