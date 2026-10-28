@@ -1,23 +1,30 @@
+%% Stridera DFD Level 0 - Context diagram (revised)
+%% Balanced against the multi-seller implementation
 flowchart LR
-  CUS["Customer"]
-  ADM["Administrator"]
-  PAY["Payment Gateway"]
-  SHP["Shipping Provider"]
-  EML["Email / Notification Service"]
+  SH["Shopper"]
+  SE["Seller / Merchant"]
+  AD["Administrator / Presenter"]
+  PP["E-Wallet Provider (sandbox)"]
+  EM["Email Service (Could Have)"]
 
-  P0(("0<br/>Shoe E-Commerce<br/>System"))
+  P0(("0<br/>Stridera<br/>E-Commerce<br/>System"))
 
-  CUS -->|"account details, search/filters, cart actions, checkout info, payment choice"| P0
-  P0 -->|"catalog results, cart totals, order confirmation, tracking status"| CUS
+  SH -->|"credentials, search and filters, variant choice, cart changes,<br/>checkout details, wallet choice, Pay Now, order status requests"| P0
+  P0 -->|"catalog and stock status, cart totals, payment link or test QR,<br/>Order Confirmed, order history, error messages"| SH
 
-  ADM -->|"product/inventory updates, promo rules, order and shipment actions"| P0
-  P0 -->|"orders, payment status, sales and stock reports"| ADM
+  SE -->|"seller registration, listing and variant data, images,<br/>stock adjustments, fulfillment updates"| P0
+  P0 -->|"approval status, own products, own order slices, stock levels"| SE
 
-  P0 -->|"payment session request (amount, order ref)"| PAY
-  PAY -->|"payment URL/QR, signed webhook result"| P0
+  AD -->|"seller approvals, brand assignment, role changes, inventory overrides,<br/>simulate payment request"| P0
+  P0 -->|"all orders with payment status, webhook and system logs,<br/>masked config status, audit logs"| AD
 
-  P0 -->|"shipment request"| SHP
-  SHP -->|"tracking number, shipment status"| P0
+  P0 -->|"payment request, payment status lookup"| PP
+  PP -->|"payment link or QR, signed payment webhook, payment status"| P0
 
-  P0 -->|"notification request"| EML
-  EML -->|"delivery status"| P0
+  P0 -->|"receipt and shipment messages"| EM
+  EM -->|"delivery failure"| P0
+
+  classDef ext fill:#ffffff,stroke:#111111,stroke-width:2px;
+  classDef proc fill:#eef7ff,stroke:#1d4ed8,stroke-width:2px;
+  class SH,SE,AD,PP,EM ext;
+  class P0 proc;

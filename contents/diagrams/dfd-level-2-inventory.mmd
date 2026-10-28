@@ -1,25 +1,49 @@
-flowchart TB
-  ADM["Administrator"]
+%% Stridera DFD Level 2 - Inventory management (decomposes the stock-adjustment part of 6.0)
+%% Scope: MANUAL stock adjustment by a seller (own products only) or an administrator (override).
+%% Automatic decrement on payment lives in dfd-level-2-checkout.mmd (4.3);
+%% restore on paid cancellation lives in dfd-level-2-fulfillment.mmd (5.4).
+%% Failure flows: not owner or inactive seller (returned as 404), negative result, missing reason.
+flowchart LR
+  SE["Seller / Merchant"]
+  AD["Administrator / Presenter"]
 
-  P61("6.1 Receive<br/>stock update")
-  P62("6.2 Validate authorized<br/>administrator")
-  P63("6.3 Update variant-level<br/>inventory")
-  P64("6.4 Record stock<br/>movement")
-  P65("6.5 Check availability")
-  P66("6.6 Return updated<br/>inventory status")
+  P61("6.1 Receive Stock<br/>Update Request")
+  P62("6.2 Authorize Actor<br/>and Ownership")
+  P63("6.3 Validate Quantity<br/>and Reason")
+  P64("6.4 Update<br/>Variant Stock")
+  P65("6.5 Record Stock Movement<br/>and Audit")
+  P66("6.6 Return Updated<br/>Availability")
 
-  D1[("D1 Users (roles)")]
-  D3[("D3 Inventory")]
-  D10[("D10 Audit Logs and Stock Movements")]
+  D1[("D1 Users, Sellers<br/>and Brands")]
+  D2[("D2 Categories, Products<br/>and Variants (stock)")]
+  D6[("D6 Stock Movements,<br/>Audit and System Logs")]
 
-  ADM -->|"variant ID, new quantity, reason"| P61
-  P61 -->|"update request"| P62
-  D1 -->|"role and account status"| P62
-  P62 -.->|"FAILURE: unauthorized"| ADM
+  SE -->|"stock adjustment (variant, new quantity or delta, reason)"| P61
+  AD -->|"inventory override (variant, new quantity or delta, reason)"| P61
+  P61 -->|"request with actor identity"| P62
+
+  D1 -->|"role, account status, seller brand assignment"| P62
+  D2 -->|"variant owner (seller)"| P62
   P62 -->|"authorized request"| P63
-  P63 -->|"updated stock (transactional)"| D3
-  P63 -->|"change details"| P64
-  P64 -->|"movement and audit entry"| D10
-  D3 -->|"current stock"| P65
-  P65 -->|"in-stock / low / out-of-stock"| P66
-  P66 -->|"inventory status"| ADM
+  P62 -->|"denied: not owner, inactive seller or wrong role"| P66
+
+  D2 -->|"current stock"| P63
+  P63 -->|"validated adjustment"| P64
+  P63 -->|"rejected: negative result or missing reason"| P66
+
+  P64 -->|"new stock quantity"| D2
+  P64 -->|"applied change (before, after, delta)"| P65
+
+  P65 -->|"stock movement, audit entry"| D6
+  P65 -->|"confirmation"| P66
+
+  D2 -->|"updated availability"| P66
+  P66 -->|"updated stock level or error"| SE
+  P66 -->|"updated stock level or error"| AD
+
+  classDef ext fill:#ffffff,stroke:#111111,stroke-width:2px;
+  classDef proc fill:#eef7ff,stroke:#1d4ed8,stroke-width:2px;
+  classDef store fill:#fff8e6,stroke:#b45309,stroke-width:2px;
+  class SE,AD ext;
+  class P61,P62,P63,P64,P65,P66 proc;
+  class D1,D2,D6 store;

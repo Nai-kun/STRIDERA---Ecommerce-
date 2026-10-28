@@ -6,7 +6,10 @@ erDiagram
         varchar first_name "NOT NULL"
         varchar last_name "NOT NULL"
         varchar phone
-        enum role "CUSTOMER, ADMIN"
+        enum role "CUSTOMER, ADMIN, SELLER"
+        enum seller_status "NONE, PENDING, APPROVED, REJECTED, SUSPENDED"
+        varchar store_name "nullable, merchant trading name"
+        text store_description "nullable"
         boolean is_active "DEFAULT true"
         timestamp created_at
         timestamp updated_at
@@ -40,9 +43,24 @@ erDiagram
         timestamp created_at
     }
 
+    brands {
+        uuid id PK
+        uuid seller_id FK "nullable, assigned merchant"
+        varchar name UK "NOT NULL"
+        varchar slug UK "NOT NULL"
+        text description "nullable"
+        varchar logo_url "nullable"
+        varchar banner_url "nullable"
+        boolean is_active "DEFAULT true"
+        timestamp created_at
+        timestamp updated_at
+    }
+
     products {
         uuid id PK
         uuid category_id FK "NOT NULL"
+        uuid brand_id FK "nullable, brand association"
+        uuid seller_id FK "nullable, owning merchant"
         varchar name "NOT NULL"
         varchar slug UK "NOT NULL"
         varchar sku UK "NOT NULL"
@@ -126,9 +144,26 @@ erDiagram
         timestamp updated_at
     }
 
+    seller_orders {
+        uuid id PK
+        uuid order_id FK "NOT NULL, parent order"
+        uuid seller_id FK "NOT NULL, fulfilling merchant"
+        enum status "PENDING, PAID, PROCESSING, SHIPPED, DELIVERED, CANCELLED"
+        int subtotal_centavos "NOT NULL, slice item sum"
+        varchar tracking_number "nullable"
+        varchar tracking_url "nullable"
+        timestamp shipped_at "nullable"
+        timestamp delivered_at "nullable"
+        timestamp cancelled_at "nullable"
+        text cancellation_reason "nullable"
+        timestamp created_at
+        timestamp updated_at
+    }
+
     order_items {
         uuid id PK
         uuid order_id FK "NOT NULL"
+        uuid seller_order_id FK "nullable, seller slice link"
         uuid product_variant_id FK "NOT NULL"
         varchar product_name "snapshot"
         varchar variant_sku "snapshot"
@@ -143,7 +178,7 @@ erDiagram
     payments {
         uuid id PK
         uuid order_id FK "NOT NULL"
-        varchar provider "e.g. paymongo"
+        varchar provider "e.g. paymongo, simulated"
         varchar provider_payment_id "provider reference"
         varchar provider_checkout_url "redirect URL"
         varchar idempotency_key UK "NOT NULL"
@@ -201,16 +236,16 @@ erDiagram
         uuid product_variant_id FK "NOT NULL"
         int quantity_change "positive or negative"
         int stock_after "resulting stock"
-        varchar reason "e.g. ORDER_PLACED, ORDER_CANCELLED, ADMIN_ADJUSTMENT"
-        uuid reference_id "nullable, order_id or admin user_id"
+        varchar reason "e.g. ORDER_PLACED, ORDER_CANCELLED, SELLER_ADJUSTMENT, ADMIN_ADJUSTMENT"
+        uuid reference_id "nullable, order_id or admin/seller user_id"
         timestamp created_at
     }
 
     audit_logs {
         uuid id PK
         uuid user_id FK "nullable"
-        varchar action "NOT NULL, e.g. PRODUCT_CREATED"
-        varchar entity_type "e.g. product, order"
+        varchar action "NOT NULL, e.g. PRODUCT_CREATED, SELLER_STATUS_UPDATED"
+        varchar entity_type "e.g. product, order, seller, brand"
         uuid entity_id
         jsonb old_values "nullable"
         jsonb new_values "nullable"
@@ -224,7 +259,11 @@ erDiagram
     users ||--o{ orders : "places many"
     users ||--o{ wishlist_items : "has many"
     users ||--o{ audit_logs : "performed by"
+    users ||--o{ brands : "assigned/operates"
+    users ||--o{ products : "manages/lists"
+    users ||--o{ seller_orders : "fulfills"
 
+    brands ||--o{ products : "brands"
     categories ||--o{ products : "contains"
 
     products ||--o{ product_variants : "has many"
@@ -238,6 +277,9 @@ erDiagram
     carts ||--o{ cart_items : "contains"
 
     orders ||--o{ order_items : "contains"
+    orders ||--o{ seller_orders : "partitioned into"
     orders ||--o{ payments : "paid via"
     orders ||--o{ shipments : "shipped via"
     orders }o--o| promotions : "uses"
+
+    seller_orders ||--o{ order_items : "contains"
