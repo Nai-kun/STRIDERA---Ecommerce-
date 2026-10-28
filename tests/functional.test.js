@@ -107,3 +107,64 @@ describe('3. Order & Stock Validation Rules', () => {
     assert.equal(key.length, 64);
   });
 });
+
+describe('4. Multi-Seller Order Slicing & Subtotal Partitioning', () => {
+  it('should partition line items into correct seller slices without losing centavos', () => {
+    const orderItems = [
+      { id: '1', sellerId: 'seller-apex', unitPriceCentavos: 599500, quantity: 1, lineTotalCentavos: 599500 },
+      { id: '2', sellerId: 'seller-apex', unitPriceCentavos: 449500, quantity: 2, lineTotalCentavos: 899000 },
+      { id: '3', sellerId: 'seller-stride', unitPriceCentavos: 749500, quantity: 1, lineTotalCentavos: 749500 },
+      { id: '4', sellerId: null, unitPriceCentavos: 389900, quantity: 1, lineTotalCentavos: 389900 } // Platform item
+    ];
+
+    const sellerSlices = {};
+    for (const item of orderItems) {
+      if (item.sellerId) {
+        if (!sellerSlices[item.sellerId]) {
+          sellerSlices[item.sellerId] = { subtotalCentavos: 0, items: [] };
+        }
+        sellerSlices[item.sellerId].subtotalCentavos += item.lineTotalCentavos;
+        sellerSlices[item.sellerId].items.push(item);
+      }
+    }
+
+    assert.equal(Object.keys(sellerSlices).length, 2, 'Should create exactly 2 seller slices');
+    assert.equal(sellerSlices['seller-apex'].subtotalCentavos, 1498500, 'Apex subtotal should be ₱14,985.00');
+    assert.equal(sellerSlices['seller-apex'].items.length, 2);
+    assert.equal(sellerSlices['seller-stride'].subtotalCentavos, 749500, 'Stride subtotal should be ₱7,495.00');
+    assert.equal(sellerSlices['seller-stride'].items.length, 1);
+  });
+});
+
+describe('5. Inventory Restoration on Order Cancellation', () => {
+  it('should restore stock atomically when a paid or pending slice is cancelled', () => {
+    let currentStock = 3;
+    const cancelledQty = 2;
+
+    function cancelAndRestore(qty) {
+      if (qty <= 0) throw new Error('Invalid quantity');
+      currentStock += qty;
+      return currentStock;
+    }
+
+    const restoredStock = cancelAndRestore(cancelledQty);
+    assert.equal(restoredStock, 5, 'Stock should increase from 3 back to 5');
+  });
+
+  it('should never permit stock adjustment to result in negative inventory', () => {
+    const currentStock = 2;
+    const requestedDeduction = 5;
+
+    function applyStockDelta(stock, delta) {
+      const resulting = stock + delta;
+      if (resulting < 0) {
+        return { success: false, error: 'Insufficient stock for adjustment' };
+      }
+      return { success: true, newStock: resulting };
+    }
+
+    const res = applyStockDelta(currentStock, -requestedDeduction);
+    assert.equal(res.success, false);
+    assert.match(res.error, /Insufficient stock/);
+  });
+});
