@@ -122,6 +122,36 @@
 - FR-12.4: Email notification on order confirmation (sandbox/console)
 - FR-12.5: Email notification on shipment status change
 
+### FR-13: Multi-Seller Marketplace & Onboarding
+- FR-13.1: Prospective merchants can register for seller accounts with store name, description, and contact info
+- FR-13.2: Seller lifecycle state machine: NONE → PENDING → APPROVED / REJECTED / SUSPENDED
+- FR-13.3: Pending sellers receive 403 Forbidden with pending review banner upon accessing merchant portal
+- FR-13.4: Admin control center for reviewing merchant applications, approving/rejecting/suspending sellers
+- FR-13.5: Admin brand assignment to approved sellers
+
+### FR-14: Seller Product & Catalog Management
+- FR-14.1: Approved sellers can create, edit, and deactivate their own catalog products
+- FR-14.2: Strict tenant isolation: querying or mutating another seller's product returns 404 Not Found (not 403)
+- FR-14.3: Per-variant stock adjustments require mandatory human reason and log immutable audit movements
+- FR-14.4: Stock adjustments prevent negative inventory balances
+
+### FR-15: Multi-Seller Order Slicing & Partitioning
+- FR-15.1: Orders containing items from multiple sellers are atomically partitioned into `SellerOrder` slices
+- FR-15.2: Each slice calculates `subtotal_centavos` as the exact sum of line items belonging to that seller
+- FR-15.3: Integer centavos arithmetic guarantees `sum(slice.subtotalCentavos) === parentOrder.subtotalCentavos` without float drift
+- FR-15.4: Payment confirmation (webhook or simulation) propagates PAID status atomically across parent and child slices
+
+### FR-16: Merchant Fulfillment & Stock Restoration
+- FR-16.1: Sellers view and fulfill exclusively their own order slices (tenant-isolated with 404 for alien slices)
+- FR-16.2: Sellers update fulfillment status (SHIPPED) and record optional tracking numbers and URLs
+- FR-16.3: Sellers can cancel paid order slices with a mandatory cancellation reason
+- FR-16.4: Slicing cancellation atomically restores variant inventory and records `ORDER_CANCELLED` stock movement
+
+### FR-17: Platform Brand Directory & Governance
+- FR-17.1: Public brand directory page (`/brands`) and brand detail storefront (`/brands/[slug]`)
+- FR-17.2: Products filterable by brand slug across shop catalog and search
+- FR-17.3: Admin can create and manage brand entities and assign official merchant operators
+
 ---
 
 ## Non-Functional Requirements
