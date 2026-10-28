@@ -10,6 +10,7 @@ function ShopPageContent() {
   const searchParams = useSearchParams();
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [brands, setBrands] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 });
   const [loading, setLoading] = useState(true);
 
@@ -17,6 +18,7 @@ function ShopPageContent() {
   const [filters, setFilters] = useState({
     search: searchParams.get('search') || '',
     category: searchParams.get('category') || '',
+    brand: searchParams.get('brand') || '',
     audience: searchParams.get('audience') || '',
     shoeType: searchParams.get('shoeType') || '',
     sort: searchParams.get('sort') || 'newest',
@@ -31,6 +33,7 @@ function ShopPageContent() {
       const params = new URLSearchParams();
       if (f.search) params.set('search', f.search);
       if (f.category) params.set('category', f.category);
+      if (f.brand) params.set('brand', f.brand);
       if (f.audience) params.set('audience', f.audience);
       if (f.shoeType) params.set('shoeType', f.shoeType);
       if (f.sort) params.set('sort', f.sort);
@@ -39,34 +42,19 @@ function ShopPageContent() {
 
       const res = await fetch(`${API}/products?${params}`);
       const data = await res.json();
-      setProducts(data.data || []);
-      setPagination(data.pagination || { page: 1, pages: 1, total: 0 });
+      setProducts(data.data?.products || data.data || []);
+      setPagination(data.data?.pagination || data.pagination || { page: 1, pages: 1, total: 0 });
     } catch (e) {
       console.error('Failed to load products', e);
-      // Fallback static products
-      setProducts([
-        { id: '1', name: 'Stridera Velocity Pro', slug: 'stridera-velocity-pro', category: 'Running', priceCentavos: 599500, compareAtPriceCentavos: 699500, imageUrl: '/assets/products/running-men-1.jpg', isActive: true },
-        { id: '2', name: 'Stridera Stride Fusion', slug: 'stridera-stride-fusion', category: 'Running', priceCentavos: 549500, compareAtPriceCentavos: 649500, imageUrl: '/assets/products/running-women-1.jpg', isActive: true },
-        { id: '3', name: 'Stridera Heritage Classic', slug: 'stridera-heritage-classic', category: 'Lifestyle', priceCentavos: 699500, imageUrl: '/assets/products/sneaker-men-1.jpg', isActive: true },
-        { id: '4', name: 'Stridera Cloud Step', slug: 'stridera-cloud-step', category: 'Lifestyle', priceCentavos: 549500, imageUrl: '/assets/products/sneaker-women-1.jpg', isActive: true },
-        { id: '5', name: 'Stridera Max Energy X', slug: 'stridera-max-energy-x', category: 'Running', priceCentavos: 749500, imageUrl: '/assets/products/running-men-3.jpg', isActive: true },
-        { id: '6', name: 'Stridera Aero Flow', slug: 'stridera-aero-flow', category: 'Running', priceCentavos: 499500, imageUrl: '/assets/products/running-women-3.jpg', isActive: true },
-        { id: '7', name: 'Stridera Soft Walk', slug: 'stridera-soft-walk', category: 'Lifestyle', priceCentavos: 449500, imageUrl: '/assets/products/sneaker-women-3.jpg', isActive: true },
-      ]);
+      setProducts([]);
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetch(`${API}/categories`).then(r => r.json()).then(d => setCategories(d.data || [])).catch(() => {
-      setCategories([
-        { id: '1', name: 'Running', slug: 'running' },
-        { id: '2', name: 'Lifestyle', slug: 'lifestyle' },
-        { id: '3', name: 'Basketball', slug: 'basketball' },
-        { id: '4', name: 'Training', slug: 'training' }
-      ]);
-    });
+    fetch(`${API}/categories`).then(r => r.json()).then(d => setCategories(d.data || [])).catch(() => {});
+    fetch(`${API}/brands`).then(r => r.json()).then(d => setBrands(d.data || [])).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -74,8 +62,8 @@ function ShopPageContent() {
   }, [filters, fetchProducts]);
 
   const setFilter = (key, val) => setFilters(prev => ({ ...prev, [key]: val, page: 1 }));
-  const clearFilters = () => setFilters({ search: '', category: '', audience: '', shoeType: '', sort: 'newest', page: 1 });
-  const hasActiveFilters = filters.search || filters.category || filters.audience || filters.shoeType;
+  const clearFilters = () => setFilters({ search: '', category: '', brand: '', audience: '', shoeType: '', sort: 'newest', page: 1 });
+  const hasActiveFilters = filters.search || filters.category || filters.brand || filters.audience || filters.shoeType;
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--color-bg)' }}>
@@ -146,6 +134,31 @@ function ShopPageContent() {
               </ul>
             </div>
 
+            {/* Brand Filter */}
+            {brands.length > 0 && (
+              <div style={{ marginBottom: 'var(--space-6)' }}>
+                <p style={{ fontSize: 'var(--text-xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 'var(--space-3)', color: 'var(--color-text-muted)' }}>Brand</p>
+                <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }} role="list">
+                  <li>
+                    <button
+                      className={filters.brand === '' ? 'btn btn-primary btn-sm w-full' : 'btn btn-ghost btn-sm w-full'}
+                      onClick={() => setFilter('brand', '')}
+                      style={{ justifyContent: 'flex-start' }}
+                    >All Brands</button>
+                  </li>
+                  {brands.map(b => (
+                    <li key={b.id}>
+                      <button
+                        className={filters.brand === b.slug ? 'btn btn-primary btn-sm w-full' : 'btn btn-ghost btn-sm w-full'}
+                        onClick={() => setFilter('brand', b.slug)}
+                        style={{ justifyContent: 'flex-start' }}
+                      >{b.name}</button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {/* Audience */}
             <div style={{ marginBottom: 'var(--space-6)' }}>
               <p style={{ fontSize: 'var(--text-xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 'var(--space-3)', color: 'var(--color-text-muted)' }}>For</p>
@@ -197,13 +210,16 @@ function ShopPageContent() {
               <>
                 <div className="grid-cols-3">
                   {products.map(p => {
-                    const discount = p.compareAtPriceCentavos && p.compareAtPriceCentavos > p.priceCentavos
-                      ? Math.round((1 - p.priceCentavos / p.compareAtPriceCentavos) * 100) : null;
+                    const priceVal = p.basePriceCentavos || p.priceCentavos || 0;
+                    const discount = p.compareAtPriceCentavos && p.compareAtPriceCentavos > priceVal
+                      ? Math.round((1 - priceVal / p.compareAtPriceCentavos) * 100) : null;
+                    const displayImg = p.primaryImage || p.imageUrl || '/assets/products/running-men-1.jpg';
+                    const categoryName = p.category?.name || p.category || 'Footwear';
                     return (
                       <article key={p.id} className="product-card">
                         <Link href={`/products/${p.slug}`} aria-label={p.name}>
                           <div className="product-card-image" style={{ position: 'relative' }}>
-                            <img src={p.imageUrl || '/assets/products/running-men-1.jpg'} alt={p.name} loading="lazy" />
+                            <img src={displayImg} alt={p.name} loading="lazy" />
                             {discount && (
                               <span className="price-badge" style={{ position: 'absolute', top: 'var(--space-3)', left: 'var(--space-3)' }}>
                                 -{discount}%
@@ -212,14 +228,21 @@ function ShopPageContent() {
                           </div>
                         </Link>
                         <div className="product-card-body">
-                          <p className="product-card-category">{p.category}</p>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <p className="product-card-category">{categoryName}</p>
+                            {p.brand && (
+                              <span style={{ fontSize: '10px', color: 'var(--color-brand-primary)', fontWeight: 600 }}>
+                                {p.brand.name}
+                              </span>
+                            )}
+                          </div>
                           <Link href={`/products/${p.slug}`}>
                             <h3 className="product-card-name">{p.name}</h3>
                           </Link>
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 'var(--space-2)' }}>
                             <div className="product-card-price">
-                              <span className="price-current">₱{(p.priceCentavos / 100).toFixed(2)}</span>
-                              {p.compareAtPriceCentavos > p.priceCentavos && (
+                              <span className="price-current">₱{(priceVal / 100).toFixed(2)}</span>
+                              {p.compareAtPriceCentavos > priceVal && (
                                 <span className="price-original">₱{(p.compareAtPriceCentavos / 100).toFixed(2)}</span>
                               )}
                             </div>

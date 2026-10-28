@@ -11,6 +11,7 @@ router.get('/', optionalAuth, async (req, res, next) => {
       page = 1,
       limit = 12,
       category,
+      brand,
       audience,
       shoeType,
       search,
@@ -31,6 +32,9 @@ router.get('/', optionalAuth, async (req, res, next) => {
 
     if (category) {
       where.category = { slug: category };
+    }
+    if (brand) {
+      where.brand = { slug: brand };
     }
     if (audience) {
       where.audience = audience.toUpperCase();
@@ -91,6 +95,8 @@ router.get('/', optionalAuth, async (req, res, next) => {
         orderBy,
         include: {
           category: { select: { id: true, name: true, slug: true } },
+          brand: { select: { id: true, name: true, slug: true, logoUrl: true } },
+          seller: { select: { id: true, storeName: true } },
           images: { where: { isPrimary: true }, take: 1 },
           variants: {
             where: { isActive: true },
@@ -109,6 +115,8 @@ router.get('/', optionalAuth, async (req, res, next) => {
       slug: p.slug,
       sku: p.sku,
       category: p.category,
+      brand: p.brand,
+      seller: p.seller,
       audience: p.audience,
       shoeType: p.shoeType,
       basePriceCentavos: p.basePriceCentavos,
@@ -178,11 +186,16 @@ router.get('/featured', async (req, res, next) => {
 // GET /api/products/filters — Available filter options
 router.get('/filters', async (req, res, next) => {
   try {
-    const [categories, colors, sizes, priceRange] = await Promise.all([
+    const [categories, brands, colors, sizes, priceRange] = await Promise.all([
       prisma.category.findMany({
         where: { isActive: true },
         select: { id: true, name: true, slug: true },
         orderBy: { sortOrder: 'asc' },
+      }),
+      prisma.brand.findMany({
+        where: { isActive: true },
+        select: { id: true, name: true, slug: true, logoUrl: true },
+        orderBy: { name: 'asc' },
       }),
       prisma.productVariant.findMany({
         where: { isActive: true, product: { isActive: true } },
@@ -206,6 +219,7 @@ router.get('/filters', async (req, res, next) => {
       success: true,
       data: {
         categories,
+        brands,
         colors: colors.map(c => ({ name: c.color, hex: c.colorHex })),
         sizes: sizes.map(s => s.size),
         audiences: ['MEN', 'WOMEN', 'UNISEX'],
@@ -228,6 +242,8 @@ router.get('/:slug', optionalAuth, async (req, res, next) => {
       where: { slug: req.params.slug },
       include: {
         category: { select: { id: true, name: true, slug: true } },
+        brand: { select: { id: true, name: true, slug: true, description: true, logoUrl: true } },
+        seller: { select: { id: true, storeName: true, storeDescription: true } },
         images: { orderBy: { sortOrder: 'asc' } },
         variants: {
           where: { isActive: true },

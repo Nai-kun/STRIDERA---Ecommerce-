@@ -30,6 +30,7 @@ function Nav({ cartCount = 0, onCartOpen }) {
               ['/shop', 'Shop'],
               ['/shop?category=running', 'Running'],
               ['/shop?category=lifestyle', 'Lifestyle'],
+              ['/brands', 'Brands'],
             ].map(([href, label]) => (
               <li key={href}>
                 <Link href={href}>{label}</Link>
@@ -540,6 +541,14 @@ export default function HomePage() {
                 <li><Link href="/shop?category=lifestyle">Lifestyle</Link></li>
                 <li><Link href="/shop?category=basketball">Basketball</Link></li>
                 <li><Link href="/shop?category=training">Training</Link></li>
+              </ul>
+            </div>
+            <div>
+              <h3 className="footer-heading">Merchants</h3>
+              <ul className="footer-links" role="list">
+                <li><Link href="/brands">Brand Directory</Link></li>
+                <li><Link href="/seller/register">Become a Merchant</Link></li>
+                <li><Link href="/seller/dashboard">Seller Hub</Link></li>
               </ul>
             </div>
             <div>

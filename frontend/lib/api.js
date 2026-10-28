@@ -35,6 +35,10 @@ export const getProduct = (slug) => apiFetch(`/products/${slug}`);
 // Categories
 export const getCategories = () => apiFetch('/categories');
 
+// Brands
+export const getBrands = () => apiFetch('/brands');
+export const getBrand = (slug) => apiFetch(`/brands/${slug}`);
+
 // Cart
 export const getCart = () => apiFetch('/cart');
 export const addToCart = (productVariantId, quantity) =>
