@@ -23,6 +23,10 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Database data
+pgdata/
+*/pgdata/
+
 # OS Files
 .DS_Store
 Thumbs.db

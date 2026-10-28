@@ -2,10 +2,9 @@
 // Run: node database/seeds/seed.js
 // All products use source/ product images. Demo data is clearly labeled.
 
-const { PrismaClient } = require('@prisma/client');
-const argon2 = require('argon2');
-
-const prisma = new PrismaClient();
+const path = require('path');
+const prisma = require(path.resolve(__dirname, '../../backend/src/lib/prisma'));
+const argon2 = require(path.resolve(__dirname, '../../backend/node_modules/argon2'));
 
 async function main() {
   console.log('🌱 Seeding STRIDERA database...\n');

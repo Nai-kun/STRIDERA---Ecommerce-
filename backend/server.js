@@ -76,10 +76,36 @@ app.get('/api/health', (req, res) => {
 app.use(notFound);
 app.use(errorHandler);
 
-app.listen(PORT, () => {
-  console.log(`🚀 STRIDERA API running on port ${PORT}`);
-  console.log(`📦 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🎮 Demo mode: ${process.env.DEMO_MODE === 'true' ? 'ON' : 'OFF'}`);
-});
+const net = require('net');
+
+async function ensureDb() {
+  const isPortOpen = await new Promise((resolve) => {
+    const s = net.connect(5432, '127.0.0.1');
+    s.on('connect', () => { s.destroy(); resolve(true); });
+    s.on('error', () => resolve(false));
+  });
+
+  if (!isPortOpen) {
+    console.log('🔄 Starting embedded PGlite PostgreSQL database on 127.0.0.1:5432...');
+    const { start: startDb } = require('./db-server');
+    await startDb();
+  }
+}
+
+async function startServer() {
+  await ensureDb();
+  app.listen(PORT, () => {
+    console.log(`🚀 STRIDERA API running on port ${PORT}`);
+    console.log(`📦 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`🎮 Demo mode: ${process.env.DEMO_MODE === 'true' ? 'ON' : 'OFF'}`);
+  });
+}
+
+if (require.main === module) {
+  startServer().catch(err => {
+    console.error('Failed to start server:', err);
+    process.exit(1);
+  });
+}
 
 module.exports = app;
