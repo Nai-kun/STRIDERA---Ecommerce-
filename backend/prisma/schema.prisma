@@ -11,7 +11,23 @@ datasource db {
 
 enum UserRole {
   CUSTOMER
+  SELLER
   ADMIN
+}
+
+enum SellerStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+enum SellerOrderStatus {
+  PENDING
+  PAID
+  SHIPPED
+  DELIVERED
+  CANCELLED
 }
 
 enum Audience {
@@ -74,22 +90,28 @@ enum DiscountType {
 }
 
 model User {
-  id           String    @id @default(uuid()) @db.Uuid
-  email        String    @unique
-  passwordHash String    @map("password_hash")
-  firstName    String    @map("first_name")
-  lastName     String    @map("last_name")
-  phone        String?
-  role         UserRole  @default(CUSTOMER)
-  isActive     Boolean   @default(true) @map("is_active")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
+  id               String        @id @default(uuid()) @db.Uuid
+  email            String        @unique
+  passwordHash     String        @map("password_hash")
+  firstName        String        @map("first_name")
+  lastName         String        @map("last_name")
+  phone            String?
+  role             UserRole      @default(CUSTOMER)
+  isActive         Boolean       @default(true) @map("is_active")
+  sellerStatus     SellerStatus? @map("seller_status")
+  storeName        String?       @map("store_name")
+  storeDescription String?       @map("store_description") @db.Text
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
 
   addresses     Address[]
   carts         Cart[]
   orders        Order[]
   wishlistItems WishlistItem[]
   auditLogs     AuditLog[]
+  brand         Brand?
+  sellerOrders  SellerOrder[]
+  products      Product[]      @relation("SellerProducts")
 
   @@map("users")
 }
@@ -115,6 +137,23 @@ model Address {
   @@map("addresses")
 }
 
+model Brand {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  slug        String   @unique
+  description String?  @db.Text
+  logoUrl     String?  @map("logo_url")
+  sellerId    String?  @unique @map("seller_id") @db.Uuid
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  seller   User?     @relation(fields: [sellerId], references: [id])
+  products Product[]
+
+  @@map("brands")
+}
+
 model Category {
   id          String   @id @default(uuid()) @db.Uuid
   name        String   @unique
@@ -133,6 +172,8 @@ model Category {
 model Product {
   id                     String    @id @default(uuid()) @db.Uuid
   categoryId             String    @map("category_id") @db.Uuid
+  sellerId               String?   @map("seller_id") @db.Uuid
+  brandId                String?   @map("brand_id") @db.Uuid
   name                   String
   slug                   String    @unique
   sku                    String    @unique
@@ -148,11 +189,15 @@ model Product {
   updatedAt              DateTime  @updatedAt @map("updated_at")
 
   category      Category        @relation(fields: [categoryId], references: [id])
+  seller        User?           @relation("SellerProducts", fields: [sellerId], references: [id])
+  brand         Brand?          @relation(fields: [brandId], references: [id])
   variants      ProductVariant[]
   images        ProductImage[]
   wishlistItems WishlistItem[]
 
   @@index([categoryId])
+  @@index([sellerId])
+  @@index([brandId])
   @@index([audience])
   @@index([shoeType])
   @@index([isActive])
@@ -259,6 +304,7 @@ model Order {
   items     OrderItem[]
   payments  Payment[]
   shipments Shipment[]
+  sellerOrders SellerOrder[]
 
   @@index([userId])
   @@index([orderStatus])
@@ -269,6 +315,7 @@ model Order {
 model OrderItem {
   id                String   @id @default(uuid()) @db.Uuid
   orderId           String   @map("order_id") @db.Uuid
+  sellerOrderId     String?  @map("seller_order_id") @db.Uuid
   productVariantId  String   @map("product_variant_id") @db.Uuid
   productName       String   @map("product_name")
   variantSku        String   @map("variant_sku")
@@ -280,6 +327,7 @@ model OrderItem {
   createdAt         DateTime @default(now()) @map("created_at")
 
   order          Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sellerOrder    SellerOrder?   @relation(fields: [sellerOrderId], references: [id])
   productVariant ProductVariant @relation(fields: [productVariantId], references: [id])
 
   @@map("order_items")
@@ -325,6 +373,29 @@ model Shipment {
 
   @@index([orderId])
   @@map("shipments")
+}
+
+model SellerOrder {
+  id                String            @id @default(uuid()) @db.Uuid
+  orderId           String            @map("order_id") @db.Uuid
+  sellerId          String            @map("seller_id") @db.Uuid
+  subtotalCentavos  Int               @map("subtotal_centavos")
+  status            SellerOrderStatus @default(PENDING)
+  trackingNumber    String?           @map("tracking_number")
+  trackingUrl       String?           @map("tracking_url")
+  shippedAt         DateTime?         @map("shipped_at")
+  deliveredAt       DateTime?         @map("delivered_at")
+  notes             String?           @db.Text
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  order  Order       @relation(fields: [orderId], references: [id])
+  seller User        @relation(fields: [sellerId], references: [id])
+  items  OrderItem[]
+
+  @@index([orderId])
+  @@index([sellerId])
+  @@map("seller_orders")
 }
 
 model Promotion {

@@ -108,7 +108,69 @@ async function main() {
     }
   });
 
-  console.log('✅ Users created');
+  // Approved Demo Seller
+  const sellerPasswordHash = await argon2.hash('Seller@123!');
+  const seller = await prisma.user.upsert({
+    where: { email: 'seller@stridera.ph' },
+    update: {},
+    create: {
+      email: 'seller@stridera.ph',
+      passwordHash: sellerPasswordHash,
+      firstName: 'Apex',
+      lastName: 'Merchant',
+      role: 'SELLER',
+      sellerStatus: 'APPROVED',
+      storeName: 'Apex Footwear Hub',
+      storeDescription: 'Authorized vendor for high-performance athletic footwear in Metro Manila.',
+      phone: '+639222222222'
+    }
+  });
+
+  // Pending Demo Seller (for testing approval flow)
+  const pendingSeller = await prisma.user.upsert({
+    where: { email: 'pending.seller@stridera.ph' },
+    update: {},
+    create: {
+      email: 'pending.seller@stridera.ph',
+      passwordHash: sellerPasswordHash,
+      firstName: 'Stride',
+      lastName: 'Applicant',
+      role: 'SELLER',
+      sellerStatus: 'PENDING',
+      storeName: 'Stride Dynamics PH',
+      storeDescription: 'Custom and lifestyle sneakers seeking platform approval.',
+      phone: '+639333333333'
+    }
+  });
+
+  // ────────────────────────────────────────────────
+  //  2.1 BRANDS
+  // ────────────────────────────────────────────────
+  const brandOfficial = await prisma.brand.upsert({
+    where: { slug: 'stridera-lab' },
+    update: {},
+    create: {
+      name: 'STRIDERA Lab',
+      slug: 'stridera-lab',
+      description: 'Official flagship performance footwear line designed by STRIDERA.',
+      logoUrl: '/assets/logo/stridera-logo.png',
+      isActive: true
+    }
+  });
+
+  const brandApex = await prisma.brand.upsert({
+    where: { slug: 'apex-athletics' },
+    update: { sellerId: seller.id },
+    create: {
+      name: 'Apex Athletics',
+      slug: 'apex-athletics',
+      description: 'Engineered distance running and endurance footwear curated by Apex Footwear Hub.',
+      sellerId: seller.id,
+      isActive: true
+    }
+  });
+
+  console.log('✅ Users & Brands created');
 
   // ────────────────────────────────────────────────
   //  3. RUNNING PRODUCTS (Men)
@@ -119,6 +181,7 @@ async function main() {
     update: {},
     create: {
       categoryId: running.id,
+      brandId: brandOfficial.id,
       name: 'Stridera Velocity Pro',
       slug: 'stridera-velocity-pro',
       sku: 'STR-RUN-M-001',
@@ -151,6 +214,8 @@ async function main() {
     update: {},
     create: {
       categoryId: running.id,
+      sellerId: seller.id,
+      brandId: brandApex.id,
       name: 'Stridera Max Energy X',
       slug: 'stridera-max-energy-x',
       sku: 'STR-RUN-M-002',
@@ -438,7 +503,9 @@ async function main() {
   console.log(`   Variants: ${variantCount}`);
   console.log(`   Images: ${imageCount}`);
   console.log(`\n🔑 Admin login: admin@stridera.ph / Admin@Stridera2024!`);
-  console.log(`   Demo login: demo@stridera.ph / Customer@123!`);
+  console.log(`   Demo customer: demo@stridera.ph / Customer@123!`);
+  console.log(`   Demo seller (approved): seller@stridera.ph / Seller@123!`);
+  console.log(`   Demo seller (pending): pending.seller@stridera.ph / Seller@123!`);
 }
 
 main()

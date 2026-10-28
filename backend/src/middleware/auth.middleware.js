@@ -24,7 +24,7 @@ async function authenticate(req, res, next) {
 
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
-      select: { id: true, email: true, role: true, isActive: true, firstName: true, lastName: true },
+      select: { id: true, email: true, role: true, isActive: true, firstName: true, lastName: true, sellerStatus: true, storeName: true },
     });
 
     if (!user || !user.isActive) {
@@ -55,7 +55,7 @@ async function optionalAuth(req, res, next) {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       const user = await prisma.user.findUnique({
         where: { id: decoded.userId },
-        select: { id: true, email: true, role: true, isActive: true, firstName: true, lastName: true },
+        select: { id: true, email: true, role: true, isActive: true, firstName: true, lastName: true, sellerStatus: true, storeName: true },
       });
       if (user && user.isActive) {
         req.user = user;
@@ -75,6 +75,32 @@ function requireAdmin(req, res, next) {
     return next(createError('Admin access required', 403));
   }
   next();
+}
+
+/**
+ * Require seller role with APPROVED status
+ * Returns 404 (not 403) for non-sellers per skill §4 (seller isolation)
+ */
+function requireSeller(req, res, next) {
+  if (!req.user || req.user.role !== 'SELLER') {
+    return next(createError('Not found', 404));
+  }
+  if (req.user.sellerStatus !== 'APPROVED') {
+    return next(createError('Seller account not approved', 403));
+  }
+  next();
+}
+
+/**
+ * Require admin OR approved seller role
+ */
+function requireAdminOrSeller(req, res, next) {
+  if (!req.user) {
+    return next(createError('Authentication required', 401));
+  }
+  if (req.user.role === 'ADMIN') return next();
+  if (req.user.role === 'SELLER' && req.user.sellerStatus === 'APPROVED') return next();
+  return next(createError('Not found', 404));
 }
 
 /**
@@ -98,4 +124,14 @@ function setTokenCookie(res, token) {
   });
 }
 
-module.exports = { authenticate, optionalAuth, requireAdmin, isAdmin: requireAdmin, generateToken, setTokenCookie };
+module.exports = {
+  authenticate,
+  optionalAuth,
+  requireAdmin,
+  isAdmin: requireAdmin,
+  requireSeller,
+  isSeller: requireSeller,
+  requireAdminOrSeller,
+  generateToken,
+  setTokenCookie
+};

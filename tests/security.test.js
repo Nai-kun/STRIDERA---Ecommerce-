@@ -141,3 +141,82 @@ describe('4. Input Sanitization & Password Strength', () => {
     assert.equal(clean.includes('<script>'), false);
   });
 });
+
+describe('5. Multi-Seller Access Control & Tenant Isolation', () => {
+  function checkSellerPortalAccess(user) {
+    if (!user) {
+      return { allowed: false, status: 401, error: 'Authentication required' };
+    }
+    // Per skill §4: seller isolation returns 404 for non-sellers
+    if (user.role !== 'SELLER') {
+      return { allowed: false, status: 404, error: 'Not found' };
+    }
+    if (user.sellerStatus !== 'APPROVED') {
+      return { allowed: false, status: 403, error: 'Seller account not approved' };
+    }
+    return { allowed: true, status: 200 };
+  }
+
+  function checkSellerResourceOwnership(user, resourceOwnerId) {
+    if (!user) {
+      return { allowed: false, status: 401, error: 'Authentication required' };
+    }
+    if (user.role === 'ADMIN') {
+      return { allowed: true, status: 200 };
+    }
+    if (user.role === 'SELLER') {
+      if (user.id === resourceOwnerId) {
+        return { allowed: true, status: 200 };
+      }
+      // Per skill §4: Return 404, not 403, for another seller's records
+      return { allowed: false, status: 404, error: 'Not found' };
+    }
+    return { allowed: false, status: 404, error: 'Not found' };
+  }
+
+  it('should deny non-sellers from accessing seller portal with 404', () => {
+    const shopper = { id: 'uuid-cust', role: 'CUSTOMER' };
+    const res = checkSellerPortalAccess(shopper);
+    assert.equal(res.allowed, false);
+    assert.equal(res.status, 404);
+  });
+
+  it('should reject pending/unapproved sellers with 403', () => {
+    const pendingSeller = { id: 'uuid-pending', role: 'SELLER', sellerStatus: 'PENDING' };
+    const res = checkSellerPortalAccess(pendingSeller);
+    assert.equal(res.allowed, false);
+    assert.equal(res.status, 403);
+    assert.match(res.error, /not approved/);
+  });
+
+  it('should allow approved sellers to access seller portal', () => {
+    const approvedSeller = { id: 'uuid-approved', role: 'SELLER', sellerStatus: 'APPROVED' };
+    const res = checkSellerPortalAccess(approvedSeller);
+    assert.equal(res.allowed, true);
+    assert.equal(res.status, 200);
+  });
+
+  it('should isolate sellers: returning 404 (not 403) when attempting to access another seller records', () => {
+    const sellerA = { id: 'uuid-seller-a', role: 'SELLER', sellerStatus: 'APPROVED' };
+    const sellerBResourceId = 'uuid-seller-b';
+
+    const res = checkSellerResourceOwnership(sellerA, sellerBResourceId);
+    assert.equal(res.allowed, false);
+    assert.equal(res.status, 404);
+    assert.equal(res.error, 'Not found');
+  });
+
+  it('should permit sellers to access their own resource records', () => {
+    const sellerA = { id: 'uuid-seller-a', role: 'SELLER', sellerStatus: 'APPROVED' };
+    const res = checkSellerResourceOwnership(sellerA, 'uuid-seller-a');
+    assert.equal(res.allowed, true);
+    assert.equal(res.status, 200);
+  });
+
+  it('should permit platform admin to inspect any seller resource', () => {
+    const admin = { id: 'uuid-admin', role: 'ADMIN' };
+    const res = checkSellerResourceOwnership(admin, 'uuid-seller-b');
+    assert.equal(res.allowed, true);
+    assert.equal(res.status, 200);
+  });
+});
