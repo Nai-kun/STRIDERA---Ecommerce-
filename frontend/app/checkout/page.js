@@ -13,6 +13,7 @@ export default function CheckoutPage() {
   const [error, setError] = useState(null);
   const [order, setOrder] = useState(null);
   const [promoCode, setPromoCode] = useState('');
+  const [simulationSuccess, setSimulationSuccess] = useState(false);
 
   const [form, setForm] = useState({
     firstName: '', lastName: '', email: '', phone: '',
@@ -54,6 +55,30 @@ export default function CheckoutPage() {
     }
   };
 
+  const handleSimulatePayment = async () => {
+    if (!order) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API}/payments/simulate`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderNumber: order.orderNumber })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSimulationSuccess(true);
+      } else {
+        setError(data.message || 'Payment simulation failed. Note: DEMO_MODE=true and admin authentication required for simulation fallback.');
+      }
+    } catch (e) {
+      setError(e.message || 'Payment simulation failed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handlePayment = async () => {
     if (!order) return;
     setLoading(true);
@@ -73,6 +98,30 @@ export default function CheckoutPage() {
       }
     } catch (e) {
       setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSimulatePayment = async () => {
+    if (!order) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API}/payments/simulate`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderNumber: order.orderNumber })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSimulationSuccess(true);
+      } else {
+        setError(data.message || 'Payment simulation failed. Note: DEMO_MODE=true and admin authentication required for simulation fallback.');
+      }
+    } catch (e) {
+      setError(e.message || 'Payment simulation failed.');
     } finally {
       setLoading(false);
     }
@@ -272,34 +321,98 @@ export default function CheckoutPage() {
         {/* STEP 3: Confirmation / Payment */}
         {step === 3 && order && (
           <div style={{ textAlign: 'center', padding: 'var(--space-8) 0' }}>
-            <div style={{ fontSize: '3rem', marginBottom: 'var(--space-4)' }}>🎉</div>
-            <h2 style={{ fontSize: 'var(--text-2xl)', fontWeight: 800, marginBottom: 'var(--space-2)' }}>Order Created!</h2>
-            <p style={{ color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
-              Order #{order.orderNumber}
-            </p>
-            <p style={{ fontWeight: 700, fontSize: 'var(--text-xl)', marginBottom: 'var(--space-6)' }}>
-              Total: {order.grandTotalFormatted}
-            </p>
-            <p style={{ color: 'var(--color-text-muted)', marginBottom: 'var(--space-8)', fontSize: 'var(--text-sm)', maxWidth: '40ch', marginInline: 'auto' }}>
-              Click below to complete payment via GCash, Maya, or GrabPay through our secure PayMongo checkout.
-            </p>
-            <button
-              className="btn btn-brand btn-lg"
-              onClick={handlePayment}
-              disabled={loading}
-              id="pay-now-btn"
-              style={{ minWidth: 200 }}
-            >
-              {loading ? 'Redirecting…' : '💳 Pay Now'}
-            </button>
-            {error && (
-              <p style={{ color: 'var(--color-error)', marginTop: 'var(--space-4)', fontSize: 'var(--text-sm)' }}>
-                {error}
-              </p>
+            {simulationSuccess ? (
+              <div style={{
+                background: 'var(--color-surface)',
+                borderRadius: 'var(--radius-xl)',
+                padding: 'var(--space-8)',
+                boxShadow: 'var(--shadow-md)',
+                maxWidth: '500px',
+                margin: '0 auto'
+              }}>
+                <div style={{ fontSize: '3.5rem', marginBottom: 'var(--space-3)' }}>✅</div>
+                <h2 style={{ fontSize: 'var(--text-3xl)', fontWeight: 800, color: 'var(--color-success)', marginBottom: 'var(--space-2)' }}>
+                  Payment Verified!
+                </h2>
+                <div style={{
+                  display: 'inline-block',
+                  background: 'rgba(34,197,94,0.1)',
+                  color: 'var(--color-success)',
+                  padding: '4px 12px',
+                  borderRadius: 'var(--radius-full)',
+                  fontSize: 'var(--text-xs)',
+                  fontWeight: 700,
+                  marginBottom: 'var(--space-4)'
+                }}>
+                  ● PAID & CONFIRMED (DEMO SIMULATION)
+                </div>
+                <p style={{ color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
+                  Order Number: <strong>{order.orderNumber}</strong>
+                </p>
+                <p style={{ fontWeight: 700, fontSize: 'var(--text-xl)', marginBottom: 'var(--space-6)' }}>
+                  Amount: {order.grandTotalFormatted}
+                </p>
+                <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginBottom: 'var(--space-6)', lineHeight: 1.6 }}>
+                  Order and seller slices have been transitioned to PAID in the database with inventory movements logged to the audit trail.
+                </p>
+                <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'center' }}>
+                  <Link href="/account/orders" className="btn btn-primary">View My Orders</Link>
+                  <Link href="/shop" className="btn btn-outline">Continue Shopping</Link>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div style={{ fontSize: '3rem', marginBottom: 'var(--space-4)' }}>🎉</div>
+                <h2 style={{ fontSize: 'var(--text-2xl)', fontWeight: 800, marginBottom: 'var(--space-2)' }}>Order Created!</h2>
+                <p style={{ color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
+                  Order #{order.orderNumber}
+                </p>
+                <p style={{ fontWeight: 700, fontSize: 'var(--text-xl)', marginBottom: 'var(--space-6)' }}>
+                  Total: {order.grandTotalFormatted}
+                </p>
+                <p style={{ color: 'var(--color-text-muted)', marginBottom: 'var(--space-8)', fontSize: 'var(--text-sm)', maxWidth: '40ch', marginInline: 'auto' }}>
+                  Click below to complete payment via GCash, Maya, or GrabPay through our secure PayMongo checkout.
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', alignItems: 'center', maxWidth: '300px', margin: '0 auto' }}>
+                  <button
+                    className="btn btn-primary btn-lg btn-full"
+                    onClick={handlePayment}
+                    disabled={loading}
+                    id="pay-now-btn"
+                  >
+                    {loading ? 'Processing…' : '💳 Pay with PayMongo Sandbox'}
+                  </button>
+
+                  <button
+                    className="btn btn-outline btn-full"
+                    onClick={handleSimulatePayment}
+                    disabled={loading}
+                    id="simulate-payment-btn"
+                    style={{ borderColor: 'var(--color-warning)', color: 'var(--color-warning)' }}
+                  >
+                    ⚡ Demo: Simulate Payment Success
+                  </button>
+                </div>
+
+                {error && (
+                  <p style={{ color: 'var(--color-error)', marginTop: 'var(--space-4)', fontSize: 'var(--text-sm)' }}>
+                    {error}
+                  </p>
+                )}
+
+                <div style={{
+                  marginTop: 'var(--space-6)',
+                  padding: 'var(--space-3)',
+                  background: 'var(--color-surface)',
+                  borderRadius: 'var(--radius-md)',
+                  display: 'inline-block',
+                  fontSize: 'var(--text-xs)',
+                  color: 'var(--color-text-muted)'
+                }}>
+                  🛡️ Sandbox mode — No real financial credentials or funds are used.
+                </div>
+              </>
             )}
-            <p style={{ marginTop: 'var(--space-6)', fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>
-              Sandbox mode — no real money will be charged.
-            </p>
           </div>
         )}
       </div>

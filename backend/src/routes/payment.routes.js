@@ -235,6 +235,12 @@ router.post('/webhook', async (req, res, next) => {
             orderStatus: 'CONFIRMED'
           }
         });
+
+        // Per DFD 4.3: transition all associated seller order slices to PAID
+        await tx.sellerOrder.updateMany({
+          where: { orderId: payment.orderId, status: 'PENDING' },
+          data: { status: 'PAID' }
+        });
       });
     }
 
@@ -295,6 +301,12 @@ router.post('/simulate', authenticate, isAdmin, async (req, res, next) => {
           paymentStatus: 'PAID',
           orderStatus: 'CONFIRMED'
         }
+      });
+
+      // Per DFD 4.3 & 4.5: transition all associated seller order slices to PAID
+      await tx.sellerOrder.updateMany({
+        where: { orderId: order.id, status: 'PENDING' },
+        data: { status: 'PAID' }
       });
 
       // Audit log

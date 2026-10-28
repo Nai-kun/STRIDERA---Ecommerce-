@@ -103,7 +103,8 @@ router.post('/', [
           color: variant.color,
           unitPriceCentavos,
           quantity: item.quantity,
-          lineTotalCentavos
+          lineTotalCentavos,
+          _sellerId: variant.product.sellerId || null
         });
 
         // Decrement stock
@@ -194,11 +195,42 @@ router.post('/', [
           promotionId,
           notes: notes || null,
           items: {
-            create: orderItems
+            create: orderItems.map(({ _sellerId, ...rest }) => rest)
           }
         },
         include: { items: true }
       });
+
+      // Split order into seller slices (SellerOrder per distinct merchant)
+      const sellerMap = new Map();
+      for (const item of orderItems) {
+        if (item._sellerId) {
+          if (!sellerMap.has(item._sellerId)) {
+            sellerMap.set(item._sellerId, []);
+          }
+          sellerMap.get(item._sellerId).push(item);
+        }
+      }
+
+      for (const [sellerId, sItems] of sellerMap.entries()) {
+        const sliceSubtotal = sItems.reduce((acc, it) => acc + it.lineTotalCentavos, 0);
+        const sellerOrder = await tx.sellerOrder.create({
+          data: {
+            orderId: order.id,
+            sellerId: sellerId,
+            subtotalCentavos: sliceSubtotal,
+            status: 'PENDING'
+          }
+        });
+
+        await tx.orderItem.updateMany({
+          where: {
+            orderId: order.id,
+            productVariantId: { in: sItems.map(it => it.productVariantId) }
+          },
+          data: { sellerOrderId: sellerOrder.id }
+        });
+      }
 
       // Clear the cart
       await tx.cartItem.deleteMany({ where: { cartId: cart.id } });
@@ -347,6 +379,11 @@ router.patch('/:orderNumber/cancel', authenticate, async (req, res, next) => {
       await tx.order.update({
         where: { id: order.id },
         data: { orderStatus: 'CANCELLED' }
+      });
+
+      await tx.sellerOrder.updateMany({
+        where: { orderId: order.id },
+        data: { status: 'CANCELLED', notes: 'Parent order cancelled' }
       });
     });
 
