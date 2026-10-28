@@ -574,4 +574,294 @@ router.get('/audit-logs', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ────────────────────────────────────────────────
+//  SELLER MANAGEMENT (Admin Only)
+// ────────────────────────────────────────────────
+
+// GET /api/admin/sellers — List all merchants
+router.get('/sellers', async (req, res, next) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+    const sellerStatus = req.query.sellerStatus;
+    const search = req.query.search?.trim();
+
+    const where = { role: 'SELLER' };
+    if (sellerStatus) where.sellerStatus = sellerStatus;
+    if (search) {
+      where.OR = [
+        { storeName: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+        { firstName: { contains: search, mode: 'insensitive' } },
+        { lastName: { contains: search, mode: 'insensitive' } }
+      ];
+    }
+
+    const [sellers, total] = await Promise.all([
+      prisma.user.findMany({
+        where,
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          phone: true,
+          role: true,
+          sellerStatus: true,
+          storeName: true,
+          storeDescription: true,
+          createdAt: true,
+          brand: { select: { id: true, name: true, slug: true } },
+          _count: { select: { products: true, sellerOrders: true } }
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit
+      }),
+      prisma.user.count({ where })
+    ]);
+
+    res.json({
+      success: true,
+      data: sellers,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/admin/sellers/:id/status — Approve / Reject / Suspend merchant
+router.patch('/sellers/:id/status', [
+  body('sellerStatus').isIn(['PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED']).withMessage('Valid seller status required')
+], async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
+
+    const { sellerStatus } = req.body;
+    const seller = await prisma.user.findFirst({
+      where: { id: req.params.id, role: 'SELLER' }
+    });
+
+    if (!seller) return res.status(404).json({ success: false, message: 'Seller account not found' });
+
+    const updated = await prisma.user.update({
+      where: { id: seller.id },
+      data: { sellerStatus }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        userId: req.user.id,
+        action: 'UPDATE_SELLER_STATUS',
+        entityType: 'User',
+        entityId: seller.id,
+        oldValues: { sellerStatus: seller.sellerStatus },
+        newValues: { sellerStatus },
+        ipAddress: req.ip
+      }
+    });
+
+    res.json({
+      success: true,
+      message: `Seller status updated to ${sellerStatus}`,
+      data: { id: updated.id, email: updated.email, sellerStatus: updated.sellerStatus }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/admin/sellers/:id/assign-brand — Assign brand to seller
+router.post('/sellers/:id/assign-brand', [
+  body('brandId').isUUID().withMessage('Valid brandId required')
+], async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
+
+    const { brandId } = req.body;
+    const seller = await prisma.user.findFirst({ where: { id: req.params.id, role: 'SELLER' } });
+    if (!seller) return res.status(404).json({ success: false, message: 'Seller not found' });
+
+    const brand = await prisma.brand.findUnique({ where: { id: brandId } });
+    if (!brand) return res.status(404).json({ success: false, message: 'Brand not found' });
+
+    const updatedBrand = await prisma.brand.update({
+      where: { id: brand.id },
+      data: { sellerId: seller.id }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        userId: req.user.id,
+        action: 'ASSIGN_BRAND_TO_SELLER',
+        entityType: 'Brand',
+        entityId: brand.id,
+        newValues: { sellerId: seller.id, brandName: brand.name },
+        ipAddress: req.ip
+      }
+    });
+
+    res.json({ success: true, message: `Brand "${brand.name}" assigned to seller`, data: updatedBrand });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ────────────────────────────────────────────────
+//  BRAND MANAGEMENT (Admin Only)
+// ────────────────────────────────────────────────
+
+// GET /api/admin/brands
+router.get('/brands', async (req, res, next) => {
+  try {
+    const brands = await prisma.brand.findMany({
+      include: {
+        seller: { select: { id: true, email: true, storeName: true, sellerStatus: true } },
+        _count: { select: { products: true } }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    res.json({ success: true, data: brands });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/admin/brands
+router.post('/brands', [
+  body('name').trim().notEmpty().withMessage('Brand name required'),
+  body('slug').trim().notEmpty().withMessage('Slug required')
+], async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
+
+    const { name, slug, description, logoUrl, sellerId } = req.body;
+
+    const brand = await prisma.brand.create({
+      data: {
+        name,
+        slug: slug.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+        description: description || null,
+        logoUrl: logoUrl || null,
+        sellerId: sellerId || null,
+        isActive: true
+      }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        userId: req.user.id,
+        action: 'CREATE_BRAND',
+        entityType: 'Brand',
+        entityId: brand.id,
+        newValues: { name, slug },
+        ipAddress: req.ip
+      }
+    });
+
+    res.status(201).json({ success: true, data: brand });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ────────────────────────────────────────────────
+//  CONFIG STATUS & WEBHOOK LOGS (Per Skill §4)
+// ────────────────────────────────────────────────
+
+// Helper: mask secrets
+function maskSecret(val) {
+  if (!val) return 'NOT CONFIGURED';
+  if (val.length <= 8) return '********';
+  return `${val.slice(0, 7)}...${val.slice(-4)}`;
+}
+
+// GET /api/admin/config-status — Read-only environment configuration check
+router.get('/config-status', async (req, res, next) => {
+  try {
+    const paymongoKey = process.env.PAYMONGO_SECRET_KEY;
+    const webhookKey = process.env.PAYMONGO_WEBHOOK_SECRET;
+    const dbUrl = process.env.DATABASE_URL;
+
+    let maskedDb = 'NOT CONFIGURED';
+    if (dbUrl) {
+      try {
+        const u = new URL(dbUrl);
+        maskedDb = `${u.protocol}//${u.username}:****@${u.host}${u.pathname}`;
+      } catch {
+        maskedDb = 'CONFIGURED (Format unparseable)';
+      }
+    }
+
+    const config = {
+      environment: process.env.NODE_ENV || 'development',
+      port: process.env.PORT || 5000,
+      frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
+      database: {
+        configured: Boolean(dbUrl),
+        connection: maskedDb
+      },
+      paymentGateway: {
+        provider: 'PayMongo (Sandbox)',
+        secretKeyConfigured: Boolean(paymongoKey),
+        secretKeyMasked: maskSecret(paymongoKey),
+        webhookSecretConfigured: Boolean(webhookKey),
+        webhookSecretMasked: maskSecret(webhookKey),
+        mode: paymongoKey?.startsWith('sk_live') ? 'LIVE' : paymongoKey ? 'TEST / SANDBOX' : 'UNCONFIGURED'
+      },
+      demoSafetyFallback: {
+        enabled: process.env.DEMO_MODE === 'true',
+        mode: process.env.DEMO_MODE === 'true' ? 'ACTIVE (Simulate Payment Available for Admin)' : 'DISABLED'
+      },
+      shipping: {
+        defaultFeeCentavos: parseInt(process.env.DEFAULT_SHIPPING_FEE_CENTAVOS || '15000'),
+        defaultFeeFormatted: `₱${(parseInt(process.env.DEFAULT_SHIPPING_FEE_CENTAVOS || '15000') / 100).toFixed(2)}`
+      },
+      systemStatus: paymongoKey ? 'READY' : 'RUNNING (Using Demo / Simulated Payment Fallback)'
+    };
+
+    res.json({ success: true, data: config });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/admin/payment-logs — Webhook & Payment audit records
+router.get('/payment-logs', async (req, res, next) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+
+    const [payments, total] = await Promise.all([
+      prisma.payment.findMany({
+        include: {
+          order: {
+            select: { orderNumber: true, grandTotalCentavos: true, paymentStatus: true, user: { select: { email: true } } }
+          }
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit
+      }),
+      prisma.payment.count()
+    ]);
+
+    res.json({
+      success: true,
+      data: payments.map(p => ({
+        ...p,
+        amountFormatted: `₱${(p.amountCentavos / 100).toFixed(2)}`
+      })),
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

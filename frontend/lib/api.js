@@ -104,3 +104,26 @@ export const fulfillSellerOrder = (id, data) =>
   apiFetch(`/seller/orders/${id}/fulfill`, { method: 'PATCH', body: JSON.stringify(data) });
 export const cancelSellerOrder = (id, reason) =>
   apiFetch(`/seller/orders/${id}/cancel`, { method: 'PATCH', body: JSON.stringify({ reason }) });
+
+// Admin Portal API
+export const getAdminSellers = (params = {}) => {
+  const qs = new URLSearchParams(params).toString();
+  return apiFetch(`/admin/sellers${qs ? '?' + qs : ''}`);
+};
+export const updateAdminSellerStatus = (id, sellerStatus) =>
+  apiFetch(`/admin/sellers/${id}/status`, { method: 'PATCH', body: JSON.stringify({ sellerStatus }) });
+export const assignAdminBrand = (sellerId, brandId) =>
+  apiFetch(`/admin/sellers/${sellerId}/assign-brand`, { method: 'POST', body: JSON.stringify({ brandId }) });
+export const getAdminBrands = () => apiFetch('/admin/brands');
+export const createAdminBrand = (data) =>
+  apiFetch('/admin/brands', { method: 'POST', body: JSON.stringify(data) });
+export const getAdminConfigStatus = () => apiFetch('/admin/config-status');
+export const getAdminPaymentLogs = () => apiFetch('/admin/payment-logs');
+export const getAdminOrders = (params = {}) => {
+  const qs = new URLSearchParams(params).toString();
+  return apiFetch(`/admin/orders${qs ? '?' + qs : ''}`);
+};
+export const getAdminReports = () => apiFetch('/admin/reports/sales');
+export const getAdminAuditLogs = () => apiFetch('/admin/audit-logs');
+export const simulatePayment = (orderNumber) =>
+  apiFetch('/payments/simulate', { method: 'POST', body: JSON.stringify({ orderNumber }) });
