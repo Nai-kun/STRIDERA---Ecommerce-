@@ -1,147 +1,243 @@
 # STRIDERA E-Commerce — Executed Test Report
 
-**Execution Date:** October 28, 2026  
+**Execution Date:** 2026-10-28 (final run after multi-seller revision)  
 **Environment:** Node.js v25.9.0 / Windows 11  
+**Branch:** `revision/multi-seller`  
 **Runner:** Native Node Test Runner (`node --test`)  
-**Overall Status:** **19 PASSED / 0 FAILED / 0 SKIPPED** (Duration: 257ms)
+**Overall Status:** ✅ **28 PASSED / 0 FAILED / 0 SKIPPED**
 
 ---
 
 ## Suite 1: Functional Tests (`tests/functional.test.js`)
 
-### Test Case 1.1: Monetary Calculations & Minor Units (Centavos)
-- **Preconditions:** Line items with integer centavo unit prices (`459900`, `389900`).
-- **Steps:** Sum item products `(unitPriceCentavos * quantity)`.
-- **Expected Result:** Subtotal is exactly `1309700` centavos (₱13,097.00) with zero floating-point rounding drift.
-- **Actual Result:** `1309700` centavos computed.
+**Run command:** `node --test tests/functional.test.js`  
+**Duration:** ~228ms | **Result: 12 PASS / 0 FAIL**
+
+---
+
+### § 1. Monetary Calculations & Minor Units (Centavos)
+
+#### TC-1.1: Accurate subtotal in integer centavos
+- **Preconditions:** Line items with unit prices `459900` and `389900` centavos, qty 2 and 1.
+- **Steps:** Sum `(unitPrice × qty)` for each item.
+- **Expected:** `1309700` centavos (₱13,097.00) — no float drift.
+- **Actual:** `1309700` ✅
 - **Status:** **PASS**
 
-### Test Case 1.2: Flat Discount Floor Boundary
-- **Preconditions:** Subtotal is ₱500.00 (`50000`), discount coupon value is ₱600.00 (`60000`).
-- **Steps:** Compute applied discount `Math.min(subtotal, discount)` and final total.
-- **Expected Result:** Applied discount is capped at subtotal (₱500.00); grand total is ₱0.00 (non-negative).
-- **Actual Result:** Applied discount: `50000`, Grand total: `0`.
+#### TC-1.2: Flat discount floor — no negative total
+- **Preconditions:** Subtotal `50000` (₱500), flat discount `60000` (₱600).
+- **Steps:** `appliedDiscount = Math.min(subtotal, discountValue)`
+- **Expected:** Applied discount `50000`, grand total `0` (never negative).
+- **Actual:** Applied `50000`, grand total `0` ✅
 - **Status:** **PASS**
 
-### Test Case 1.3: Percentage Discount Calculation
-- **Preconditions:** Subtotal ₱4,599.00 (`459900`), 10% discount code (`STRIDE10`).
-- **Steps:** Calculate `Math.floor((subtotal * 10) / 100)` and deduct from subtotal.
-- **Expected Result:** Discount is 45,990 centavos (₱459.90); grand total is 413,910 centavos (₱4,139.10).
-- **Actual Result:** Discount: `45990`, Grand total: `413910`.
+#### TC-1.3: Percentage discount with floor rounding
+- **Preconditions:** Subtotal `459900` (₱4,599), 10% code, max ₱500 cap.
+- **Steps:** `Math.floor((459900 × 10) / 100)` = `45990`
+- **Expected:** Discount `45990`, grand total `413910`.
+- **Actual:** Discount `45990`, grand total `413910` ✅
 - **Status:** **PASS**
 
-### Test Case 1.4: Promo Code Validation — Percentage
-- **Preconditions:** Promo code `STRIDE10` registered and active.
-- **Steps:** Validate `STRIDE10` against subtotal `400000`.
-- **Expected Result:** Validation succeeds (`valid: true`) with discount `40000`.
-- **Actual Result:** `valid: true`, discount: `40000`.
+---
+
+### § 2. Promo Code Engine Rules
+
+#### TC-2.1: Accept valid percentage promo
+- **Preconditions:** Active promo `STRIDE10`, 10%, max `50000` discount.
+- **Expected:** Discount computed and applied successfully.
+- **Actual:** Promo applied ✅
 - **Status:** **PASS**
 
-### Test Case 1.5: Promo Code Validation — Minimum Order Threshold
-- **Preconditions:** Promo code `WELCOME500` has minimum order requirement of ₱3,000.00 (`300000`).
-- **Steps:** Apply `WELCOME500` to a cart subtotal of ₱2,500.00 (`250000`).
-- **Expected Result:** Validation rejected with descriptive error message.
-- **Actual Result:** Validation rejected: `Minimum order of ₱3000.00 required`.
+#### TC-2.2: Reject flat promo below minimum order
+- **Preconditions:** Promo requires min order `300000`, subtotal is `200000`.
+- **Expected:** Promo rejected with minimum order error.
+- **Actual:** Rejected ✅
 - **Status:** **PASS**
 
-### Test Case 1.6: Promo Code Validation — Deactivated / Expired
-- **Preconditions:** Promo code `EXPIRED50` with `isActive: false`.
-- **Steps:** Attempt validation against any cart total.
-- **Expected Result:** Validation rejected: `Invalid or expired promo code`.
-- **Actual Result:** Validation rejected: `Invalid or expired promo code`.
+#### TC-2.3: Reject expired / deactivated promo
+- **Preconditions:** Promo `isActive: false` and `expiresAt` in the past.
+- **Expected:** Promo rejected.
+- **Actual:** Rejected ✅
 - **Status:** **PASS**
 
-### Test Case 1.7: Order Item Quantity Validation
-- **Preconditions:** Incoming order request payload with variable quantities.
-- **Steps:** Validate `Number.isInteger(qty) && qty > 0`.
-- **Expected Result:** Accepts positive integers (1, 5); rejects 0, negatives (-3), and floats (1.5).
-- **Actual Result:** Exactly matched expected boolean conditions.
+---
+
+### § 3. Order & Stock Validation Rules
+
+#### TC-3.1: Reject invalid quantity
+- **Preconditions:** Quantities `0`, `-1`, `1.5`.
+- **Expected:** All rejected as invalid.
+- **Actual:** All rejected ✅
 - **Status:** **PASS**
 
-### Test Case 1.8: Philippine Mobile Number Validation
-- **Preconditions:** Contact information field input.
-- **Steps:** Test formats against regex `^(09|\+639)\d{9}$`.
-- **Expected Result:** `09171234567` and `+63 917 123 4567` accepted; invalid lengths rejected.
-- **Actual Result:** Validated successfully.
+#### TC-3.2: Validate Philippine mobile numbers
+- **Preconditions:** Valid `+639171234567`, invalid `12345`.
+- **Expected:** Valid accepted, invalid rejected.
+- **Actual:** Correct ✅
 - **Status:** **PASS**
 
-### Test Case 1.9: Idempotency Key Generation
-- **Preconditions:** Order submission with unique order number.
-- **Steps:** Generate SHA-256 digest hash.
-- **Expected Result:** Produces 64-character hexadecimal idempotency string.
-- **Actual Result:** Produced 64-char string.
+#### TC-3.3: Idempotency key construction
+- **Preconditions:** Order ID and user ID supplied.
+- **Expected:** Key is SHA-256 hash, deterministic for same inputs.
+- **Actual:** Consistent hash produced ✅
+- **Status:** **PASS**
+
+---
+
+### § 4. Multi-Seller Order Slicing & Subtotal Partitioning
+
+#### TC-4.1: Partition line items into correct seller slices without losing centavos
+- **Preconditions:** 3 items — 2 from Seller A, 1 from Seller B.
+- **Steps:** Run slice partitioning algorithm; sum `subtotalCentavos` per slice.
+- **Expected:**  
+  - Slice A: `subtotalCentavos = 919800` (items 1+2)  
+  - Slice B: `subtotalCentavos = 389900` (item 3)  
+  - `919800 + 389900 = 1309700 = parentOrder.subtotalCentavos` ✅
+- **Actual:** Correct ✅
+- **Status:** **PASS**
+
+---
+
+### § 5. Inventory Restoration on Order Cancellation
+
+#### TC-5.1: Atomic stock restore on slice cancellation
+- **Preconditions:** Variant with `stock = 5`, PAID order with `qty = 2` deducted → `stock = 3`.
+- **Steps:** Cancel the seller slice.
+- **Expected:** Stock restored to `5` atomically.
+- **Actual:** `stock = 5` ✅
+- **Status:** **PASS**
+
+#### TC-5.2: No negative inventory
+- **Preconditions:** Variant `stock = 2`, adjustment requests `qty = 5`.
+- **Expected:** Adjustment rejected; stock stays `≥ 0`.
+- **Actual:** Rejected ✅
 - **Status:** **PASS**
 
 ---
 
 ## Suite 2: Security Tests (`tests/security.test.js`)
 
-### Test Case 2.1: Admin Route Authentication Requirement
-- **Preconditions:** Unauthenticated HTTP request (no JWT token / user object).
-- **Steps:** Evaluate route guard middleware.
-- **Expected Result:** HTTP 401 Unauthorized (`Authentication required`).
-- **Actual Result:** Status 401 returned.
-- **Status:** **PASS**
+**Run command:** `node --test tests/security.test.js`  
+**Duration:** ~202ms | **Result: 16 PASS / 0 FAIL**
 
-### Test Case 2.2: Admin Route Role Authorization
-- **Preconditions:** Authenticated user with role `CUSTOMER`.
-- **Steps:** Access `/api/admin` protected endpoint.
-- **Expected Result:** HTTP 403 Forbidden (`Admin privileges required`).
-- **Actual Result:** Status 403 returned with error message.
-- **Status:** **PASS**
+---
 
-### Test Case 2.3: Admin Access Grant
-- **Preconditions:** Authenticated user with role `ADMIN`.
-- **Steps:** Access `/api/admin` endpoint.
-- **Expected Result:** HTTP 200 OK access granted.
-- **Actual Result:** Status 200 returned.
-- **Status:** **PASS**
+### § 1. Access Control & Role-Based Authorization
 
-### Test Case 2.4: Demo Safety Gate — DEMO_MODE Disabled
-- **Preconditions:** `DEMO_MODE=false` or undefined in environment.
-- **Steps:** Admin sends POST request to `/api/payments/simulate`.
-- **Expected Result:** Rejection with HTTP 403 `Demo mode is disabled`.
-- **Actual Result:** Status 403 returned.
-- **Status:** **PASS**
+#### TC-S1.1: Unauthenticated → 401
+- **Steps:** Call admin route with no token.
+- **Expected:** `401 Unauthorized`
+- **Actual:** `401` ✅ — **PASS**
 
-### Test Case 2.5: Demo Safety Gate — Non-Admin User in Demo Mode
-- **Preconditions:** `DEMO_MODE=true`, request sent by standard shopper.
-- **Steps:** Send POST to `/api/payments/simulate`.
-- **Expected Result:** Rejection with HTTP 403 `Admin access required for demo fallback`.
-- **Actual Result:** Status 403 returned.
-- **Status:** **PASS**
+#### TC-S1.2: Customer → admin route → 403
+- **Steps:** Call admin route with a `CUSTOMER` role JWT.
+- **Expected:** `403 Forbidden`
+- **Actual:** `403` ✅ — **PASS**
 
-### Test Case 2.6: Demo Safety Gate — Authorized Simulation
-- **Preconditions:** `DEMO_MODE=true` AND authenticated user role is `ADMIN`.
-- **Steps:** Execute simulate payment action.
-- **Expected Result:** HTTP 200 OK, transitions order status and writes audit log.
-- **Actual Result:** Status 200 granted.
-- **Status:** **PASS**
+#### TC-S1.3: Admin → admin route → 200
+- **Steps:** Call admin route with an `ADMIN` role JWT.
+- **Expected:** `200 OK`
+- **Actual:** `200` ✅ — **PASS**
 
-### Test Case 2.7: Webhook Signature Verification — Legitimate
-- **Preconditions:** PayMongo webhook payload with valid timestamp and HMAC-SHA256 signature.
-- **Steps:** Compute expected signature using secret and verify using timing-safe comparison.
-- **Expected Result:** Signature verification evaluates to `true`.
-- **Actual Result:** Evaluated to `true`.
-- **Status:** **PASS**
+---
 
-### Test Case 2.8: Webhook Signature Verification — Tampered Payload
-- **Preconditions:** Payload data altered in transit while retaining original signature header.
-- **Steps:** Verify against computed HMAC.
-- **Expected Result:** Verification evaluates to `false`.
-- **Actual Result:** Evaluated to `false`.
-- **Status:** **PASS**
+### § 2. Demo Safety Fallback Gatekeeper (DEMO_MODE)
 
-### Test Case 2.9: Password Strength Enforcement
-- **Preconditions:** Registration requests with passwords under 8 characters.
-- **Steps:** Check password length validation rule.
-- **Expected Result:** Rejects `< 8` chars; accepts `>= 8` chars.
-- **Actual Result:** Enforced accurately.
-- **Status:** **PASS**
+#### TC-S2.1: Reject simulate when DEMO_MODE ≠ true
+- **Preconditions:** `DEMO_MODE` unset.
+- **Expected:** Simulate endpoint returns `403`.
+- **Actual:** `403` ✅ — **PASS**
 
-### Test Case 2.10: XSS Payload Sanitization in Text Fields
-- **Preconditions:** Delivery instructions containing `<script>` injection payload.
-- **Steps:** Sanitize string to remove malicious script elements.
-- **Expected Result:** Strips executable script tags cleanly without breaking user message.
-- **Actual Result:** `<script>alert("xss")</script>` removed; string safely sanitized.
-- **Status:** **PASS**
+#### TC-S2.2: Reject simulate by non-admin even with DEMO_MODE=true
+- **Preconditions:** `DEMO_MODE=true`, request from customer role.
+- **Expected:** `403 Forbidden`
+- **Actual:** `403` ✅ — **PASS**
+
+#### TC-S2.3: Allow simulate by admin with DEMO_MODE=true
+- **Preconditions:** `DEMO_MODE=true`, request from admin role.
+- **Expected:** `200 OK`
+- **Actual:** `200` ✅ — **PASS**
+
+---
+
+### § 3. Webhook Signature Verification
+
+#### TC-S3.1: Accept legitimate webhook with valid HMAC
+- **Steps:** Compute HMAC-SHA256 using webhook secret; compare with constant-time equality.
+- **Expected:** Signature accepted.
+- **Actual:** Accepted ✅ — **PASS**
+
+#### TC-S3.2: Reject forged webhook
+- **Steps:** Submit webhook with tampered body/signature.
+- **Expected:** `400 Bad Request` — signature mismatch.
+- **Actual:** `400` ✅ — **PASS**
+
+---
+
+### § 4. Input Sanitization & Password Strength
+
+#### TC-S4.1: Reject short passwords
+- **Steps:** Attempt registration with 7-char password.
+- **Expected:** `400` validation error.
+- **Actual:** `400` ✅ — **PASS**
+
+#### TC-S4.2: Strip script tags from notes/addresses
+- **Steps:** Submit `<script>alert('xss')</script>` in address notes.
+- **Expected:** Script tags stripped from stored value.
+- **Actual:** Stripped ✅ — **PASS**
+
+---
+
+### § 5. Multi-Seller Access Control & Tenant Isolation
+
+#### TC-S5.1: Non-seller → seller portal → 404
+- **Steps:** Customer-role JWT hits `/api/seller/products`.
+- **Expected:** `404 Not Found` (not 403 — avoids disclosing route existence)
+- **Actual:** `404` ✅ — **PASS**
+
+#### TC-S5.2: Pending seller → seller portal → 403
+- **Steps:** Seller with `sellerStatus = PENDING` hits `/api/seller/products`.
+- **Expected:** `403 Forbidden` with pending review message.
+- **Actual:** `403` ✅ — **PASS**
+
+#### TC-S5.3: Approved seller → seller portal → 200
+- **Steps:** Seller with `sellerStatus = APPROVED` hits `/api/seller/products`.
+- **Expected:** `200 OK`
+- **Actual:** `200` ✅ — **PASS**
+
+#### TC-S5.4: Seller A cannot see Seller B's product → 404
+- **Steps:** Seller A's JWT requests Seller B's product ID.
+- **Expected:** `404 Not Found` (tenant isolation — 404 not 403 to preserve confidentiality)
+- **Actual:** `404` ✅ — **PASS**
+
+#### TC-S5.5: Seller sees own product → 200
+- **Steps:** Seller A's JWT requests Seller A's own product.
+- **Expected:** `200 OK`
+- **Actual:** `200` ✅ — **PASS**
+
+#### TC-S5.6: Admin can inspect any seller's product
+- **Steps:** Admin JWT requests Seller A's product.
+- **Expected:** `200 OK`
+- **Actual:** `200` ✅ — **PASS**
+
+---
+
+## Summary
+
+| Suite | Tests | Pass | Fail | Duration |
+|-------|-------|------|------|---------|
+| `functional.test.js` | 12 | **12** | 0 | ~228ms |
+| `security.test.js` | 16 | **16** | 0 | ~202ms |
+| **Total** | **28** | **28** | **0** | **~430ms** |
+
+**All 28 tests PASS. No failures. No skipped tests.**
+
+---
+
+## Database Consistency Assertions (Manual)
+
+Verified post-payment and post-cancellation:
+- ✅ No negative `stock_quantity` values in `product_variants`
+- ✅ No `PAID` order without a corresponding verified `Payment` record
+- ✅ No orphan `SellerOrder` rows — every slice links to a valid parent `Order`
+- ✅ Every stock adjustment has a corresponding `stock_movements` entry with a non-empty `reason`

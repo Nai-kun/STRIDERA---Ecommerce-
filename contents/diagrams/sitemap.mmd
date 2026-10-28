@@ -1,0 +1,84 @@
+%% STRIDERA Sitemap and User Navigation Flow
+%% Shows all pages and the primary navigation paths for each user role
+
+flowchart TD
+  subgraph PUBLIC["🌐 Public Pages"]
+    HOME["/ (Homepage)"]
+    SHOP["/shop"]
+    PDP["/products/[slug]"]
+    BRANDS["/brands"]
+    BRAND_SLUG["/brands/[slug]"]
+    CART["/cart"]
+    LOGIN["/login"]
+    REGISTER["/register"]
+    SELLER_REG["/seller/register"]
+  end
+
+  subgraph CHECKOUT_FLOW["🛒 Checkout Flow (Guest or Authenticated)"]
+    CHECKOUT["/checkout"]
+    CHECKOUT_SUCCESS["/checkout/success"]
+    CHECKOUT_FAIL["/checkout/failed"]
+  end
+
+  subgraph ACCOUNT["👤 Customer Account (Authenticated)"]
+    ACCOUNT_ORDERS["/account/orders"]
+    ACCOUNT_ORDER_DETAIL["/account/orders/[id]"]
+    WISHLIST["/account/wishlist"]
+  end
+
+  subgraph SELLER_PORTAL["🏪 Seller Portal (Approved Seller)"]
+    SELLER_DASH["/seller/dashboard"]
+    SELLER_PRODUCTS["/seller/products"]
+    SELLER_ORDERS["/seller/orders"]
+  end
+
+  subgraph ADMIN_PORTAL["🔑 Admin Portal (Admin Role)"]
+    ADMIN_DASH["/admin/dashboard"]
+  end
+
+  %% Guest / Shopper paths
+  HOME -->|"Browse catalog"| SHOP
+  HOME -->|"Brands section"| BRANDS
+  SHOP -->|"Click product"| PDP
+  BRANDS -->|"Click brand"| BRAND_SLUG
+  BRAND_SLUG -->|"Click product"| PDP
+  PDP -->|"Add to Cart"| CART
+  CART -->|"Proceed to Checkout"| CHECKOUT
+  CHECKOUT -->|"Payment success"| CHECKOUT_SUCCESS
+  CHECKOUT -->|"Payment failed"| CHECKOUT_FAIL
+  CHECKOUT -->|"⚡ Demo simulate (admin)"| CHECKOUT_SUCCESS
+
+  %% Auth paths
+  HOME -->|"Login"| LOGIN
+  HOME -->|"Register"| REGISTER
+  LOGIN -->|"Success"| HOME
+  REGISTER -->|"Success"| HOME
+
+  %% Seller onboarding
+  HOME -->|"Become a seller"| SELLER_REG
+  SELLER_REG -->|"Submitted (PENDING)"| LOGIN
+
+  %% Customer account
+  LOGIN -->|"Customer logged in"| ACCOUNT_ORDERS
+  ACCOUNT_ORDERS -->|"Order detail"| ACCOUNT_ORDER_DETAIL
+  LOGIN -->|"Wishlist"| WISHLIST
+
+  %% Seller portal
+  LOGIN -->|"Approved seller"| SELLER_DASH
+  SELLER_DASH -->|"Manage products"| SELLER_PRODUCTS
+  SELLER_DASH -->|"Manage orders"| SELLER_ORDERS
+
+  %% Admin portal
+  LOGIN -->|"Admin"| ADMIN_DASH
+
+  classDef pub fill:#f0f9ff,stroke:#0ea5e9,stroke-width:1px;
+  classDef auth fill:#f0fdf4,stroke:#22c55e,stroke-width:1px;
+  classDef seller fill:#fefce8,stroke:#eab308,stroke-width:1px;
+  classDef admin fill:#fdf4ff,stroke:#a855f7,stroke-width:1px;
+  classDef flow fill:#fff7ed,stroke:#f97316,stroke-width:1px;
+
+  class HOME,SHOP,PDP,BRANDS,BRAND_SLUG,CART,LOGIN,REGISTER,SELLER_REG pub;
+  class CHECKOUT,CHECKOUT_SUCCESS,CHECKOUT_FAIL flow;
+  class ACCOUNT_ORDERS,ACCOUNT_ORDER_DETAIL,WISHLIST auth;
+  class SELLER_DASH,SELLER_PRODUCTS,SELLER_ORDERS seller;
+  class ADMIN_DASH admin;
