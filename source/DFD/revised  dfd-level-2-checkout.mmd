@@ -1,0 +1,113 @@
+%% Stridera DFD Level 2 - Checkout and payment (decomposes 3.0 and 4.0)
+%% PAID has exactly two entries into 4.3: a verified webhook (via 4.2) or the gated simulate path (4.5).
+%% Failure flows shown: validation error, out of stock, sandbox unavailable, invalid or duplicate webhook,
+%% payment failed or cancelled, expiry, stock conflict after payment, email failure.
+flowchart LR
+  SH["Shopper"]
+  AD["Administrator / Presenter"]
+  PP["E-Wallet Provider (sandbox)"]
+  EM["Email Service (Could Have)"]
+
+  subgraph S3["3.0 Cart and Checkout"]
+    P31("3.1 Receive and Validate<br/>Checkout Request")
+    P32("3.2 Revalidate<br/>Cart and Stock")
+    P33("3.3 Calculate<br/>Trusted Totals")
+    P34("3.4 Create<br/>PENDING Order")
+  end
+
+  subgraph S4["4.0 Payment and Order Processing"]
+    P41("4.1 Create<br/>Payment Session")
+    P42("4.2 Receive and Verify<br/>Payment Result")
+    P43("4.3 Finalize Order<br/>and Stock")
+    P44("4.4 Handle Failed, Cancelled<br/>or Expired Payment")
+    P45("4.5 Simulate Payment Success<br/>(demo mode only)")
+    P46("4.6 Show Order<br/>Confirmation")
+    P47("4.7 Send Receipt")
+  end
+
+  D1[("D1 Users, Sellers<br/>and Brands")]
+  D2[("D2 Categories, Products<br/>and Variants (stock)")]
+  D3[("D3 Carts<br/>and Cart Items")]
+  D4[("D4 Orders, Order Items<br/>and Seller Orders")]
+  D5[("D5 Payment Transactions<br/>and Webhook Events")]
+  D6[("D6 Stock Movements,<br/>Audit and System Logs")]
+
+  %% ---- 3.1 Receive and validate ----
+  SH -->|"checkout details, wallet choice, idempotency key"| P31
+  P31 -->|"validation errors"| SH
+  D1 -->|"shopper session"| P31
+  D4 -->|"existing order for idempotency key"| P31
+  P31 -->|"validated request"| P32
+
+  %% ---- 3.2 Revalidate cart and stock ----
+  D3 -->|"cart items"| P32
+  D2 -->|"variants, product status, stock"| P32
+  D1 -->|"seller status"| P32
+  P32 -->|"unavailable or out-of-stock items"| SH
+  P32 -->|"valid order lines"| P33
+
+  %% ---- 3.3 Trusted totals ----
+  D2 -->|"current prices"| P33
+  P33 -->|"line totals, shipping fee, grand total"| P34
+
+  %% ---- 3.4 Create PENDING order ----
+  P34 -->|"PENDING order, order items, seller orders"| D4
+  P34 -->|"order reference and trusted amount"| P41
+
+  %% ---- 4.1 Create payment session ----
+  P41 -->|"payment request (order ref, amount, return URL)"| PP
+  PP -->|"payment link or QR, provider reference"| P41
+  P41 -->|"PENDING payment transaction"| D5
+  P41 -->|"payment link or QR"| SH
+  P41 -->|"sandbox unavailable error, demo fallback offer"| SH
+
+  %% ---- 4.2 Receive and verify payment result ----
+  PP -->|"signed webhook event"| P42
+  D5 -->|"transaction, processed event ids"| P42
+  D4 -->|"order total and currency"| P42
+  P42 -->|"webhook event record"| D5
+  P42 -->|"rejected webhook summary (bad signature, unknown order, amount mismatch)"| D6
+  P42 -->|"verified paid event"| P43
+  P42 -->|"verified failed or cancelled event"| P44
+
+  %% ---- 4.3 Finalize order and stock ----
+  P43 -->|"transaction PAID, verified_at"| D5
+  P43 -->|"order and seller orders PAID"| D4
+  P43 -->|"conditional stock decrement"| D2
+  D2 -->|"stock result"| P43
+  P43 -->|"stock movements"| D6
+  P43 -->|"stock conflict (cancel, refund needed)"| P44
+  P43 -->|"paid order for receipt"| P47
+
+  %% ---- 4.4 Failed, cancelled or expired ----
+  D4 -->|"unpaid orders past expiry"| P44
+  P44 -->|"CANCELLED order status"| D4
+  P44 -->|"FAILED, CANCELLED or EXPIRED transaction"| D5
+  P44 -->|"failure log, refund-needed flag"| D6
+
+  %% ---- 4.5 Simulate payment success (fallback) ----
+  AD -->|"simulate payment request"| P45
+  D4 -->|"PENDING order"| P45
+  P45 -->|"simulated payment result (provider SIMULATED)"| P43
+  P45 -->|"audit log entry"| D6
+  P45 -->|"result or access denied"| AD
+
+  %% ---- 4.6 Show order confirmation ----
+  SH -->|"order status request (return URL, polling)"| P46
+  D4 -->|"order status"| P46
+  P46 -->|"payment status lookup (reconcile if still PENDING)"| PP
+  PP -->|"payment status"| P46
+  P46 -->|"verified paid status from lookup"| P43
+  P46 -->|"Order Confirmed, Confirming payment, or failure page"| SH
+
+  %% ---- 4.7 Send receipt ----
+  P47 -->|"receipt message"| EM
+  EM -->|"delivery failure"| P47
+  P47 -->|"email failure log (never rolls back the order)"| D6
+
+  classDef ext fill:#ffffff,stroke:#111111,stroke-width:2px;
+  classDef proc fill:#eef7ff,stroke:#1d4ed8,stroke-width:2px;
+  classDef store fill:#fff8e6,stroke:#b45309,stroke-width:2px;
+  class SH,AD,PP,EM ext;
+  class P31,P32,P33,P34,P41,P42,P43,P44,P45,P46,P47 proc;
+  class D1,D2,D3,D4,D5,D6 store;

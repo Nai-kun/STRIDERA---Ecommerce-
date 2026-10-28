@@ -166,3 +166,4 @@ Captures every significant architectural or design decision, its rationale, alte
 **Rationale**: The revised DFDs (5 files) precisely document every process, data store, and external entity for the multi-seller architecture. Combined with the requirements doc, they provide sufficient fidelity to implement all slices.
 
 **Consequences**: All 5 source DFDs were treated as the authoritative revised spec. Implementation decisions align exactly with the DFD process decompositions.
+

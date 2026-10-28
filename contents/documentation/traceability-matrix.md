@@ -121,3 +121,4 @@ Maps every requirement from `requirements.md` (FR-01 to FR-17, NFR-01 to NFR-05)
 | **NFR-03** | Maintainability: modular routes, Prisma schema | One file per domain | ✅ |
 | **NFR-04** | Testability: isolated pure functions | `tests/functional.test.js`, `tests/security.test.js` | ✅ |
 | **NFR-05** | Documented API and architecture | `contents/documentation/api.md`, diagrams, README | ✅ |
+

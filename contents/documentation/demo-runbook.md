@@ -137,3 +137,4 @@
 | Seller portal shows 403 | Seller account may be PENDING — log in as admin and approve first |
 | Backend 500 error on startup | Run `npx prisma generate` inside `backend/` directory |
 | "Relation does not exist" DB error | Run `npx prisma db push` from `backend/` then re-seed |
+

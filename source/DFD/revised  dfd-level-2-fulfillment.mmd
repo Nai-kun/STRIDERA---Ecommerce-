@@ -1,0 +1,61 @@
+%% Stridera DFD Level 2 - Seller order fulfillment (decomposes 5.0)
+%% No shipping provider: fulfillment is a manual seller update with an optional tracking text field.
+%% Allowed seller transitions: PAID to SHIPPED, PAID to CANCELLED (reason required). PENDING slices are untouchable.
+%% Failure flows: other seller's slice (404), invalid transition, unpaid slice, email failure.
+flowchart LR
+  SE["Seller / Merchant"]
+  EM["Email Service (Could Have)"]
+
+  P51("5.1 Retrieve Own<br/>Order Slices")
+  P52("5.2 Validate Ownership<br/>and Transition")
+  P53("5.3 Mark Shipped and<br/>Save Tracking")
+  P54("5.4 Cancel Paid Slice<br/>and Restore Stock")
+  P55("5.5 Update Parent<br/>Order Status")
+  P56("5.6 Notify Shopper")
+
+  D1[("D1 Users, Sellers<br/>and Brands")]
+  D2[("D2 Categories, Products<br/>and Variants (stock)")]
+  D4[("D4 Orders, Order Items<br/>and Seller Orders")]
+  D6[("D6 Stock Movements,<br/>Audit and System Logs")]
+
+  %% ---- 5.1 Retrieve ----
+  SE -->|"order list request (status filter)"| P51
+  D1 -->|"seller session and status"| P51
+  D4 -->|"own order slices"| P51
+  P51 -->|"own order slices (fulfillment fields only)"| SE
+
+  %% ---- 5.2 Validate ----
+  SE -->|"fulfillment update (ship with tracking, or cancel with reason)"| P52
+  D4 -->|"slice and current status"| P52
+  P52 -->|"error: not found, invalid transition or unpaid slice"| SE
+  P52 -->|"ship request"| P53
+  P52 -->|"cancel request"| P54
+
+  %% ---- 5.3 Ship ----
+  P53 -->|"slice SHIPPED, tracking text, shipped_at"| D4
+  P53 -->|"audit entry"| D6
+  P53 -->|"slice status changed"| P55
+
+  %% ---- 5.4 Cancel paid slice ----
+  P54 -->|"slice CANCELLED, refund-needed flag"| D4
+  P54 -->|"stock restore"| D2
+  P54 -->|"stock movement, audit entry"| D6
+  P54 -->|"slice status changed"| P55
+
+  %% ---- 5.5 Parent order status ----
+  D4 -->|"all slices of the order"| P55
+  P55 -->|"derived order status"| D4
+  P55 -->|"updated slice and order status"| SE
+  P55 -->|"status change to announce"| P56
+
+  %% ---- 5.6 Notify ----
+  P56 -->|"shipment or cancellation notice"| EM
+  EM -->|"delivery failure"| P56
+  P56 -->|"email failure log (never rolls back the status change)"| D6
+
+  classDef ext fill:#ffffff,stroke:#111111,stroke-width:2px;
+  classDef proc fill:#eef7ff,stroke:#1d4ed8,stroke-width:2px;
+  classDef store fill:#fff8e6,stroke:#b45309,stroke-width:2px;
+  class SE,EM ext;
+  class P51,P52,P53,P54,P55,P56 proc;
+  class D1,D2,D4,D6 store;

@@ -95,3 +95,4 @@ router.get('/:slug', async (req, res, next) => {
 });
 
 module.exports = router;
+

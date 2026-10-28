@@ -54,3 +54,4 @@
 | File | Description |
 |------|-------------|
 | [`executed-test-report.md`](test-reports/executed-test-report.md) | Full executed test report — 28 tests, 0 failures, with step-by-step evidence |
+

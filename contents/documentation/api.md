@@ -735,3 +735,4 @@ SHIPPED → (delivery confirmed)         → DELIVERED
 ```
 
 Cross-seller lookups at any step return `404 Not Found` (not `403`) to preserve confidentiality per tenant isolation policy.
+
