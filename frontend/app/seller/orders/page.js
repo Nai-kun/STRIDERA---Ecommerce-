@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { getSellerOrders, fulfillSellerOrder, cancelSellerOrder } from '../../../lib/api';
+import { getSellerOrders, acceptSellerOrder, fulfillSellerOrder, cancelSellerOrder } from '../../../lib/api';
 
 export default function SellerOrdersPage() {
   const [orders, setOrders] = useState([]);
@@ -12,7 +12,12 @@ export default function SellerOrdersPage() {
 
   // Modal states
   const [fulfillModal, setFulfillModal] = useState({ open: false, orderId: null });
-  const [trackingForm, setTrackingForm] = useState({ trackingNumber: '', trackingUrl: '', notes: '' });
+  const [trackingForm, setTrackingForm] = useState({
+    trackingNumber: '',
+    courierName: 'STRIDERA Express Courier',
+    trackingUrl: '',
+    notes: ''
+  });
 
   const [cancelModal, setCancelModal] = useState({ open: false, orderId: null });
   const [cancelReason, setCancelReason] = useState('');
@@ -39,6 +44,18 @@ export default function SellerOrdersPage() {
     loadOrders();
   }, [statusFilter]);
 
+  const handleAccept = async (orderId) => {
+    try {
+      const res = await acceptSellerOrder(orderId);
+      if (res.success) {
+        notify('Order accepted and moved to PROCESSING! Delivery shipment initialized.');
+        loadOrders();
+      }
+    } catch (err) {
+      notify(err.message || 'Failed to accept order', true);
+    }
+  };
+
   const handleFulfill = async (e) => {
     e.preventDefault();
     if (!fulfillModal.orderId) return;
@@ -46,9 +63,9 @@ export default function SellerOrdersPage() {
     try {
       const res = await fulfillSellerOrder(fulfillModal.orderId, trackingForm);
       if (res.success) {
-        notify('Order slice marked as SHIPPED!');
+        notify('Order slice marked as SHIPPED and handed off to Delivery Personnel!');
         setFulfillModal({ open: false, orderId: null });
-        setTrackingForm({ trackingNumber: '', trackingUrl: '', notes: '' });
+        setTrackingForm({ trackingNumber: '', courierName: 'STRIDERA Express Courier', trackingUrl: '', notes: '' });
         loadOrders();
       }
     } catch (err) {
@@ -111,13 +128,13 @@ export default function SellerOrdersPage() {
         <div style={{ marginBottom: 'var(--space-6)' }}>
           <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-4xl)' }}>Fulfillment & Order Slices</h1>
           <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>
-            Process and ship orders for your brand items. Dispatches update the customer and parent order status.
+            Accept, prepare, and dispatch orders for your brand items. Dispatches create a shipment record for Delivery Personnel.
           </p>
         </div>
 
         {/* Filter Tabs */}
         <div style={{ display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-6)', flexWrap: 'wrap' }}>
-          {['', 'PENDING', 'PAID', 'SHIPPED', 'DELIVERED', 'CANCELLED'].map((st) => (
+          {['', 'PENDING', 'PAID', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'].map((st) => (
             <button
               key={st}
               onClick={() => setStatusFilter(st)}
@@ -160,8 +177,8 @@ export default function SellerOrdersPage() {
                         borderRadius: 'var(--radius-full)',
                         fontSize: 'var(--text-xs)',
                         fontWeight: 600,
-                        background: slice.status === 'SHIPPED' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(245, 158, 11, 0.1)',
-                        color: slice.status === 'SHIPPED' ? 'var(--color-success)' : 'var(--color-warning)'
+                        background: slice.status === 'SHIPPED' || slice.status === 'DELIVERED' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                        color: slice.status === 'SHIPPED' || slice.status === 'DELIVERED' ? 'var(--color-success)' : 'var(--color-warning)'
                       }}>
                         {slice.status}
                       </span>
@@ -207,7 +224,7 @@ export default function SellerOrdersPage() {
                 </div>
 
                 {/* Actions */}
-                <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end' }}>
+                <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                   {slice.status !== 'SHIPPED' && slice.status !== 'DELIVERED' && slice.status !== 'CANCELLED' && (
                     <>
                       <button
@@ -217,6 +234,16 @@ export default function SellerOrdersPage() {
                       >
                         Cancel Slice
                       </button>
+
+                      {(slice.status === 'PENDING' || slice.status === 'PAID') && (
+                        <button
+                          className="btn btn-outline btn-sm"
+                          onClick={() => handleAccept(slice.id)}
+                        >
+                          ✓ Accept & Prepare Order
+                        </button>
+                      )}
+
                       <button
                         className="btn btn-primary btn-sm"
                         onClick={() => setFulfillModal({ open: true, orderId: slice.id })}
@@ -249,10 +276,26 @@ export default function SellerOrdersPage() {
               Dispatch & Fulfill Order
             </h2>
             <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-4)' }}>
-              Enter courier tracking details to notify the customer.
+              Enter courier and tracking details to notify the customer and Delivery Personnel.
             </p>
 
             <form onSubmit={handleFulfill} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
+                  Courier / Logistics Partner
+                </label>
+                <select
+                  value={trackingForm.courierName}
+                  onChange={e => setTrackingForm({ ...trackingForm, courierName: e.target.value })}
+                  style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                >
+                  <option value="STRIDERA Express Courier">STRIDERA Express Courier</option>
+                  <option value="LBC Express">LBC Express</option>
+                  <option value="J&T Express">J&T Express</option>
+                  <option value="GrabExpress">GrabExpress</option>
+                </select>
+              </div>
+
               <div>
                 <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
                   Tracking Number / Waybill
@@ -350,4 +393,3 @@ export default function SellerOrdersPage() {
     </div>
   );
 }
-

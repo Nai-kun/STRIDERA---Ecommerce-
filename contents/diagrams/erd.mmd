@@ -1,285 +1,31 @@
 erDiagram
-    users {
-        uuid id PK
-        varchar email UK "NOT NULL, unique"
-        varchar password_hash "NOT NULL"
-        varchar first_name "NOT NULL"
-        varchar last_name "NOT NULL"
-        varchar phone
-        enum role "CUSTOMER, ADMIN, SELLER"
-        enum seller_status "NONE, PENDING, APPROVED, REJECTED, SUSPENDED"
-        varchar store_name "nullable, merchant trading name"
-        text store_description "nullable"
-        boolean is_active "DEFAULT true"
-        timestamp created_at
-        timestamp updated_at
-    }
+    User ||--o{ Address : "saves"
+    User ||--o{ Product : "lists (as SELLER)"
+    User ||--o{ Order : "places (as CUSTOMER)"
+    User ||--o{ SellerOrder : "fulfills (as SELLER)"
+    User ||--o{ Review : "writes"
+    User ||--o{ StockMovement : "logs (as INVENTORY_MANAGER)"
+    User ||--o{ Shipment : "delivers (as DELIVERY_PERSONNEL)"
+    User ||--o{ SupportTicket : "submits / resolves"
+    User ||--o{ SellerPayout : "receives / processes"
+    User ||--o{ AuditLog : "triggers"
 
-    addresses {
-        uuid id PK
-        uuid user_id FK "NOT NULL"
-        varchar label "e.g. Home, Office"
-        varchar full_name "NOT NULL"
-        varchar phone "NOT NULL"
-        varchar address_line1 "NOT NULL"
-        varchar address_line2
-        varchar city "NOT NULL"
-        varchar province "NOT NULL"
-        varchar postal_code "NOT NULL"
-        varchar country "DEFAULT PH"
-        boolean is_default "DEFAULT false"
-        timestamp created_at
-        timestamp updated_at
-    }
+    Category ||--o{ Product : "categorizes"
+    Brand ||--o{ Product : "brands"
+    Product ||--o{ ProductVariant : "has SKUs"
+    Product ||--o{ ProductImage : "displays"
+    Product ||--o{ Review : "receives"
 
-    categories {
-        uuid id PK
-        varchar name UK "NOT NULL"
-        varchar slug UK "NOT NULL"
-        text description
-        varchar image_url
-        int sort_order "DEFAULT 0"
-        boolean is_active "DEFAULT true"
-        timestamp created_at
-    }
+    ProductVariant ||--o{ OrderItem : "purchased in"
+    ProductVariant ||--o{ StockMovement : "tracked by"
 
-    brands {
-        uuid id PK
-        uuid seller_id FK "nullable, assigned merchant"
-        varchar name UK "NOT NULL"
-        varchar slug UK "NOT NULL"
-        text description "nullable"
-        varchar logo_url "nullable"
-        varchar banner_url "nullable"
-        boolean is_active "DEFAULT true"
-        timestamp created_at
-        timestamp updated_at
-    }
+    Order ||--o{ OrderItem : "contains"
+    Order ||--o{ SellerOrder : "sliced into"
+    Order ||--o{ Payment : "paid via"
+    Order ||--o{ Shipment : "dispatched via"
+    Order ||--o{ SupportTicket : "referenced by"
 
-    products {
-        uuid id PK
-        uuid category_id FK "NOT NULL"
-        uuid brand_id FK "nullable, brand association"
-        uuid seller_id FK "nullable, owning merchant"
-        varchar name "NOT NULL"
-        varchar slug UK "NOT NULL"
-        varchar sku UK "NOT NULL"
-        text description
-        text features
-        int base_price_centavos "NOT NULL, DECIMAL as integer"
-        int compare_at_price_centavos "nullable, for sale display"
-        enum audience "MEN, WOMEN, UNISEX"
-        enum shoe_type "RUNNING, LIFESTYLE, BASKETBALL, TRAINING"
-        boolean is_active "DEFAULT true"
-        boolean is_featured "DEFAULT false"
-        timestamp created_at
-        timestamp updated_at
-    }
+    SellerOrder ||--o{ OrderItem : "groups seller items"
+    SellerOrder ||--o| Shipment : "fulfilled by"
 
-    product_variants {
-        uuid id PK
-        uuid product_id FK "NOT NULL"
-        varchar variant_sku UK "NOT NULL"
-        varchar size "NOT NULL, e.g. US 7"
-        varchar color "NOT NULL"
-        varchar color_hex "for swatch display"
-        int price_override_centavos "nullable, overrides base"
-        int stock_quantity "NOT NULL, DEFAULT 0"
-        boolean is_active "DEFAULT true"
-        timestamp created_at
-        timestamp updated_at
-    }
-
-    product_images {
-        uuid id PK
-        uuid product_id FK "NOT NULL"
-        varchar url "NOT NULL"
-        varchar alt_text
-        int sort_order "DEFAULT 0"
-        boolean is_primary "DEFAULT false"
-        timestamp created_at
-    }
-
-    carts {
-        uuid id PK
-        uuid user_id FK "nullable, NULL for guest"
-        varchar session_id "for guest carts"
-        timestamp expires_at
-        timestamp created_at
-        timestamp updated_at
-    }
-
-    cart_items {
-        uuid id PK
-        uuid cart_id FK "NOT NULL"
-        uuid product_variant_id FK "NOT NULL"
-        int quantity "NOT NULL, CHECK > 0"
-        timestamp created_at
-        timestamp updated_at
-    }
-
-    orders {
-        uuid id PK
-        varchar order_number UK "NOT NULL, e.g. STR-20261027-001"
-        uuid user_id FK "nullable, NULL for guest"
-        varchar guest_email "for guest orders"
-        enum order_status "PENDING, CONFIRMED, PROCESSING, SHIPPED, DELIVERED, CANCELLED"
-        enum payment_status "UNPAID, PENDING, PAID, FAILED, REFUNDED"
-        enum shipping_status "UNFULFILLED, PREPARING, SHIPPED, IN_TRANSIT, DELIVERED"
-        int subtotal_centavos "NOT NULL"
-        int discount_total_centavos "DEFAULT 0"
-        int shipping_fee_centavos "NOT NULL"
-        int grand_total_centavos "NOT NULL"
-        varchar shipping_full_name "snapshot"
-        varchar shipping_phone "snapshot"
-        varchar shipping_address_line1 "snapshot"
-        varchar shipping_address_line2 "snapshot"
-        varchar shipping_city "snapshot"
-        varchar shipping_province "snapshot"
-        varchar shipping_postal_code "snapshot"
-        varchar shipping_country "snapshot"
-        uuid promotion_id FK "nullable"
-        varchar notes
-        timestamp created_at
-        timestamp updated_at
-    }
-
-    seller_orders {
-        uuid id PK
-        uuid order_id FK "NOT NULL, parent order"
-        uuid seller_id FK "NOT NULL, fulfilling merchant"
-        enum status "PENDING, PAID, PROCESSING, SHIPPED, DELIVERED, CANCELLED"
-        int subtotal_centavos "NOT NULL, slice item sum"
-        varchar tracking_number "nullable"
-        varchar tracking_url "nullable"
-        timestamp shipped_at "nullable"
-        timestamp delivered_at "nullable"
-        timestamp cancelled_at "nullable"
-        text cancellation_reason "nullable"
-        timestamp created_at
-        timestamp updated_at
-    }
-
-    order_items {
-        uuid id PK
-        uuid order_id FK "NOT NULL"
-        uuid seller_order_id FK "nullable, seller slice link"
-        uuid product_variant_id FK "NOT NULL"
-        varchar product_name "snapshot"
-        varchar variant_sku "snapshot"
-        varchar size "snapshot"
-        varchar color "snapshot"
-        int unit_price_centavos "snapshot, NOT NULL"
-        int quantity "NOT NULL"
-        int line_total_centavos "NOT NULL"
-        timestamp created_at
-    }
-
-    payments {
-        uuid id PK
-        uuid order_id FK "NOT NULL"
-        varchar provider "e.g. paymongo, simulated"
-        varchar provider_payment_id "provider reference"
-        varchar provider_checkout_url "redirect URL"
-        varchar idempotency_key UK "NOT NULL"
-        int amount_centavos "NOT NULL"
-        varchar currency "DEFAULT PHP"
-        enum status "PENDING, PAID, FAILED, CANCELLED, EXPIRED"
-        boolean is_demo "DEFAULT false"
-        varchar webhook_event_id "for dedup"
-        timestamp verified_at
-        timestamp created_at
-        timestamp updated_at
-    }
-
-    shipments {
-        uuid id PK
-        uuid order_id FK "NOT NULL"
-        varchar carrier "e.g. manual, LBC, J&T"
-        varchar tracking_number
-        varchar tracking_url
-        enum status "PREPARING, SHIPPED, IN_TRANSIT, DELIVERED, FAILED"
-        int shipping_fee_centavos
-        text notes
-        timestamp shipped_at
-        timestamp delivered_at
-        timestamp created_at
-        timestamp updated_at
-    }
-
-    promotions {
-        uuid id PK
-        varchar code UK "NOT NULL"
-        varchar description
-        enum discount_type "FLAT, PERCENTAGE"
-        int discount_value "centavos for FLAT, basis points for PERCENTAGE"
-        int min_order_centavos "nullable"
-        int max_discount_centavos "nullable, cap for PERCENTAGE"
-        int usage_limit "nullable"
-        int times_used "DEFAULT 0"
-        timestamp starts_at
-        timestamp expires_at
-        boolean is_active "DEFAULT true"
-        timestamp created_at
-        timestamp updated_at
-    }
-
-    wishlist_items {
-        uuid id PK
-        uuid user_id FK "NOT NULL"
-        uuid product_id FK "NOT NULL"
-        timestamp created_at
-    }
-
-    stock_movements {
-        uuid id PK
-        uuid product_variant_id FK "NOT NULL"
-        int quantity_change "positive or negative"
-        int stock_after "resulting stock"
-        varchar reason "e.g. ORDER_PLACED, ORDER_CANCELLED, SELLER_ADJUSTMENT, ADMIN_ADJUSTMENT"
-        uuid reference_id "nullable, order_id or admin/seller user_id"
-        timestamp created_at
-    }
-
-    audit_logs {
-        uuid id PK
-        uuid user_id FK "nullable"
-        varchar action "NOT NULL, e.g. PRODUCT_CREATED, SELLER_STATUS_UPDATED"
-        varchar entity_type "e.g. product, order, seller, brand"
-        uuid entity_id
-        jsonb old_values "nullable"
-        jsonb new_values "nullable"
-        varchar ip_address
-        timestamp created_at
-    }
-
-    %% Relationships
-    users ||--o{ addresses : "has many"
-    users ||--o{ carts : "has one active"
-    users ||--o{ orders : "places many"
-    users ||--o{ wishlist_items : "has many"
-    users ||--o{ audit_logs : "performed by"
-    users ||--o{ brands : "assigned/operates"
-    users ||--o{ products : "manages/lists"
-    users ||--o{ seller_orders : "fulfills"
-
-    brands ||--o{ products : "brands"
-    categories ||--o{ products : "contains"
-
-    products ||--o{ product_variants : "has many"
-    products ||--o{ product_images : "has many"
-    products ||--o{ wishlist_items : "wishlisted by"
-
-    product_variants ||--o{ cart_items : "in carts"
-    product_variants ||--o{ order_items : "ordered as"
-    product_variants ||--o{ stock_movements : "tracked by"
-
-    carts ||--o{ cart_items : "contains"
-
-    orders ||--o{ order_items : "contains"
-    orders ||--o{ seller_orders : "partitioned into"
-    orders ||--o{ payments : "paid via"
-    orders ||--o{ shipments : "shipped via"
-    orders }o--o| promotions : "uses"
-
-    seller_orders ||--o{ order_items : "contains"
+    SupportTicket ||--o{ TicketMessage : "contains thread"

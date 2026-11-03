@@ -1,83 +1,115 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
-import { getProducts, getCategories } from '../lib/api';
+
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+
+function getPortalForRole(role) {
+  switch (role) {
+    case 'SELLER': return { href: '/seller/dashboard', label: 'Seller Hub' };
+    case 'ADMIN': return { href: '/admin/dashboard', label: 'Admin Portal' };
+    case 'INVENTORY_MANAGER': return { href: '/inventory', label: 'Inventory Portal' };
+    case 'DELIVERY_PERSONNEL': return { href: '/delivery', label: 'Delivery Portal' };
+    case 'CUSTOMER_SUPPORT': return { href: '/support', label: 'Support Portal' };
+    case 'FINANCE_OFFICER': return { href: '/finance', label: 'Finance Portal' };
+    default: return { href: '/account/orders', label: 'My Orders' };
+  }
+}
 
 // ─── NAV ────────────────────────────────────────────────
 function Nav({ cartCount = 0, onCartOpen }) {
   const [scrolled, setScrolled] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const [mobileOpen] = useState(false);
+  const [user, setUser] = useState(null);
 
   useEffect(() => {
     const handler = () => setScrolled(window.scrollY > 10);
     window.addEventListener('scroll', handler, { passive: true });
+    try {
+      const stored = localStorage.getItem('stridera_user');
+      if (stored) setUser(JSON.parse(stored));
+    } catch {}
     return () => window.removeEventListener('scroll', handler);
   }, []);
 
+  const portal = user ? getPortalForRole(user.role) : null;
+
   return (
-    <>
-      <nav className={`nav${scrolled ? ' scrolled' : ''}`} role="navigation" aria-label="Main navigation">
-        <div className="container nav-inner">
-          <Link href="/" className="nav-logo" aria-label="STRIDERA homepage">
-            <img src="/assets/logo/stridera-logo.png" alt="STRIDERA" height="36" />
+    <nav className={`nav${scrolled ? ' scrolled' : ''}`} role="navigation" aria-label="Main navigation">
+      <div className="container nav-inner">
+        <Link href="/" className="nav-logo" aria-label="STRIDERA homepage">
+          <img src="/assets/logo/stridera-logo.png" alt="STRIDERA" height="36" />
+        </Link>
+
+        <ul className="nav-links" role="list" style={{ display: mobileOpen ? 'flex' : undefined }}>
+          {[
+            ['/', 'Home'],
+            ['/shop', 'Shop'],
+            ['/shop?category=running', 'Running'],
+            ['/shop?category=lifestyle', 'Lifestyle'],
+            ['/brands', 'Brands'],
+          ].map(([href, label]) => (
+            <li key={href}>
+              <Link href={href}>{label}</Link>
+            </li>
+          ))}
+        </ul>
+
+        <div className="nav-actions" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          {user && portal && (
+            <Link
+              href={portal.href}
+              className="btn btn-primary btn-sm"
+              style={{ fontSize: 'var(--text-xs)', padding: '6px 12px' }}
+            >
+              {portal.label}
+            </Link>
+          )}
+
+          <Link
+            href={user ? '/account/profile' : '/account/login'}
+            className="btn btn-ghost btn-sm"
+            aria-label="Account"
+            title={user ? `${user.firstName} (${user.role})` : 'Sign In'}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+              <circle cx="12" cy="7" r="4"/>
+            </svg>
+            {user && <span style={{ fontSize: 'var(--text-xs)', marginLeft: 4 }}>{user.firstName}</span>}
           </Link>
 
-          <ul className="nav-links" role="list" style={{ display: mobileOpen ? 'flex' : undefined }}>
-            {[
-              ['/', 'Home'],
-              ['/shop', 'Shop'],
-              ['/shop?category=running', 'Running'],
-              ['/shop?category=lifestyle', 'Lifestyle'],
-              ['/brands', 'Brands'],
-            ].map(([href, label]) => (
-              <li key={href}>
-                <Link href={href}>{label}</Link>
-              </li>
-            ))}
-          </ul>
+          <Link href="/shop/wishlist" className="btn btn-ghost btn-sm" aria-label="Wishlist">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+            </svg>
+          </Link>
 
-          <div className="nav-actions">
-            <Link href="/account/login" className="btn btn-ghost btn-sm" aria-label="Account">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                <circle cx="12" cy="7" r="4"/>
-              </svg>
-              <span style={{display:'none'}}>Account</span>
-            </Link>
-
-            <Link href="/shop/wishlist" className="btn btn-ghost btn-sm" aria-label="Wishlist">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
-              </svg>
-            </Link>
-
-            <button
-              className="btn btn-ghost btn-sm"
-              onClick={onCartOpen}
-              aria-label={`Cart, ${cartCount} items`}
-              id="cart-toggle-btn"
-              style={{ position: 'relative' }}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/>
-                <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
-              </svg>
-              {cartCount > 0 && (
-                <span style={{
-                  position: 'absolute', top: '-2px', right: '-2px',
-                  background: 'var(--color-brand-primary)', color: '#fff',
-                  borderRadius: '9999px', width: '16px', height: '16px',
-                  fontSize: '10px', fontWeight: 700,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center'
-                }} aria-live="polite">{cartCount}</span>
-              )}
-            </button>
-          </div>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={onCartOpen}
+            aria-label={`Cart, ${cartCount} items`}
+            id="cart-toggle-btn"
+            style={{ position: 'relative' }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/>
+              <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
+            </svg>
+            {cartCount > 0 && (
+              <span style={{
+                position: 'absolute', top: '-2px', right: '-2px',
+                background: 'var(--color-brand-primary)', color: '#fff',
+                borderRadius: '9999px', width: '16px', height: '16px',
+                fontSize: '10px', fontWeight: 700,
+                display: 'flex', alignItems: 'center', justifyContent: 'center'
+              }} aria-live="polite">{cartCount}</span>
+            )}
+          </button>
         </div>
-      </nav>
-    </>
+      </div>
+    </nav>
   );
 }
 
@@ -172,8 +204,13 @@ function CartDrawer({ open, onClose, cartData, onUpdateQty, onRemove }) {
 
 // ─── PRODUCT CARD ─────────────────────────────────────────
 function ProductCard({ product, onAddToCart }) {
-  const discount = product.compareAtPriceCentavos && product.compareAtPriceCentavos > product.priceCentavos
-    ? Math.round((1 - product.priceCentavos / product.compareAtPriceCentavos) * 100)
+  const priceCentavos = product.basePriceCentavos ?? product.priceCentavos ?? 0;
+  const imgUrl = product.primaryImage || product.imageUrl || '/assets/products/running-men-1.jpg';
+  const catName = typeof product.category === 'object' ? product.category?.name : product.category;
+  const sellerName = product.seller?.storeName || null;
+
+  const discount = product.compareAtPriceCentavos && product.compareAtPriceCentavos > priceCentavos
+    ? Math.round((1 - priceCentavos / product.compareAtPriceCentavos) * 100)
     : null;
 
   return (
@@ -181,7 +218,7 @@ function ProductCard({ product, onAddToCart }) {
       <Link href={`/products/${product.slug}`} aria-label={`View ${product.name}`}>
         <div className="product-card-image">
           <img
-            src={product.imageUrl || '/assets/products/running-men-1.jpg'}
+            src={imgUrl}
             alt={product.name}
             loading="lazy"
           />
@@ -193,14 +230,21 @@ function ProductCard({ product, onAddToCart }) {
         </div>
       </Link>
       <div className="product-card-body">
-        <p className="product-card-category">{product.category}</p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 4 }}>
+          <p className="product-card-category">{catName}</p>
+          {sellerName && (
+            <span style={{ fontSize: '10px', color: 'var(--color-brand-primary)', fontWeight: 600 }}>
+              {sellerName}
+            </span>
+          )}
+        </div>
         <Link href={`/products/${product.slug}`}>
           <h3 className="product-card-name">{product.name}</h3>
         </Link>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 'var(--space-3)' }}>
           <div className="product-card-price">
-            <span className="price-current">₱{(product.priceCentavos / 100).toFixed(2)}</span>
-            {product.compareAtPriceCentavos > product.priceCentavos && (
+            <span className="price-current">₱{(priceCentavos / 100).toFixed(2)}</span>
+            {product.compareAtPriceCentavos > priceCentavos && (
               <span className="price-original">₱{(product.compareAtPriceCentavos / 100).toFixed(2)}</span>
             )}
           </div>
@@ -209,7 +253,7 @@ function ProductCard({ product, onAddToCart }) {
             onClick={() => onAddToCart(product)}
             aria-label={`Quick add ${product.name} to cart`}
           >
-            Add
+            View
           </button>
         </div>
       </div>
@@ -244,47 +288,41 @@ export default function HomePage() {
   const [cart, setCart] = useState(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [featuredProducts, setFeaturedProducts] = useState([]);
-  const [newArrivals, setNewArrivals] = useState([]);
   const [categories, setCategories] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [addingToCart, setAddingToCart] = useState(null);
   const [notification, setNotification] = useState(null);
 
   useEffect(() => {
     async function loadData() {
       try {
-        const [catsRes, featuredRes, newRes] = await Promise.allSettled([
-          fetch('/api/categories').then(r => r.json()).catch(() => ({ data: [] })),
-          fetch((process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api') + '/products?featured=true&limit=4').then(r => r.json()).catch(() => ({ data: [] })),
-          fetch((process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api') + '/products?limit=8&sort=newest').then(r => r.json()).catch(() => ({ data: [] })),
+        const [catsRes, featuredRes, cartRes] = await Promise.allSettled([
+          fetch(`${API}/categories`).then(r => r.json()).catch(() => ({ data: [] })),
+          fetch(`${API}/products?featured=true&limit=4`).then(r => r.json()).catch(() => ({ data: [] })),
+          fetch(`${API}/cart`, { credentials: 'include' }).then(r => r.json()).catch(() => ({ data: null })),
         ]);
 
         if (catsRes.status === 'fulfilled') setCategories(catsRes.value?.data || []);
-        if (featuredRes.status === 'fulfilled') setFeaturedProducts(featuredRes.value?.data || []);
-        if (newRes.status === 'fulfilled') setNewArrivals(newRes.value?.data || []);
+        if (featuredRes.status === 'fulfilled') {
+          const list = featuredRes.value?.data?.products || featuredRes.value?.data || [];
+          setFeaturedProducts(Array.isArray(list) ? list : []);
+        }
+        if (cartRes.status === 'fulfilled' && cartRes.value?.data) {
+          setCart(cartRes.value.data);
+        }
       } catch (e) {
         console.error('Failed to load homepage data', e);
-      } finally {
-        setLoading(false);
       }
     }
 
     loadData();
   }, []);
 
-  const showNotification = (msg) => {
-    setNotification(msg);
-    setTimeout(() => setNotification(null), 2500);
-  };
-
   const handleAddToCart = async (product) => {
-    // Navigate to PDP for variant selection (size/color required)
     window.location.href = `/products/${product.slug}`;
   };
 
   const handleUpdateQty = async (itemId, qty) => {
     try {
-      const res = await fetch((process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api') + `/cart/items/${itemId}`, {
+      const res = await fetch(`${API}/cart/items/${itemId}`, {
         method: 'PATCH',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -297,7 +335,7 @@ export default function HomePage() {
 
   const handleRemoveItem = async (itemId) => {
     try {
-      const res = await fetch((process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api') + `/cart/items/${itemId}`, {
+      const res = await fetch(`${API}/cart/items/${itemId}`, {
         method: 'DELETE',
         credentials: 'include'
       });
@@ -306,7 +344,6 @@ export default function HomePage() {
     } catch (e) { console.error(e); }
   };
 
-  // Fallback static data for when API is not connected
   const displayCategories = categories.length > 0 ? categories : [
     { id: '1', name: 'Running', slug: 'running', imageUrl: '/assets/products/running-men-1.jpg' },
     { id: '2', name: 'Lifestyle', slug: 'lifestyle', imageUrl: '/assets/products/sneaker-women-1.jpg' },
@@ -315,15 +352,14 @@ export default function HomePage() {
   ];
 
   const displayFeatured = featuredProducts.length > 0 ? featuredProducts : [
-    { id: '1', name: 'Stridera Velocity Pro', slug: 'stridera-velocity-pro', category: 'Running', priceCentavos: 599500, compareAtPriceCentavos: 699500, imageUrl: '/assets/products/running-men-1.jpg' },
-    { id: '2', name: 'Stridera Stride Fusion', slug: 'stridera-stride-fusion', category: 'Running', priceCentavos: 549500, compareAtPriceCentavos: 649500, imageUrl: '/assets/products/running-women-1.jpg' },
-    { id: '3', name: 'Stridera Heritage Classic', slug: 'stridera-heritage-classic', category: 'Lifestyle', priceCentavos: 699500, imageUrl: '/assets/products/sneaker-men-1.jpg' },
-    { id: '4', name: 'Stridera Cloud Step', slug: 'stridera-cloud-step', category: 'Lifestyle', priceCentavos: 549500, imageUrl: '/assets/products/sneaker-women-1.jpg' },
+    { id: '1', name: 'Stridera Velocity Pro', slug: 'stridera-velocity-pro', category: 'Running', basePriceCentavos: 599500, compareAtPriceCentavos: 699500, primaryImage: '/assets/products/running-men-1.jpg' },
+    { id: '2', name: 'Stridera Stride Fusion', slug: 'stridera-stride-fusion', category: 'Running', basePriceCentavos: 549500, compareAtPriceCentavos: 649500, primaryImage: '/assets/products/running-women-1.jpg' },
+    { id: '3', name: 'Stridera Heritage Classic', slug: 'stridera-heritage-classic', category: 'Lifestyle', basePriceCentavos: 699500, primaryImage: '/assets/products/sneaker-men-1.jpg' },
+    { id: '4', name: 'Stridera Cloud Step', slug: 'stridera-cloud-step', category: 'Lifestyle', basePriceCentavos: 549500, primaryImage: '/assets/products/sneaker-women-1.jpg' },
   ];
 
   return (
     <>
-      {/* Toast notification */}
       {notification && (
         <div role="status" aria-live="polite" style={{
           position: 'fixed', bottom: 'var(--space-6)', left: '50%', transform: 'translateX(-50%)',
@@ -335,15 +371,12 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Announcement bar */}
       <div className="announcement-bar" role="complementary" aria-label="Promotions">
-        🎉 Free shipping on orders ₱3,000+ &nbsp;|&nbsp; Use code <strong>STRIDE10</strong> for 10% off
+        🎉 Free shipping on orders ₱3,000+ &nbsp;|&nbsp; Use code <strong>STRIDE10</strong> for 10% off &nbsp;|&nbsp; Pay with GCash, Maya, or PayPal
       </div>
 
-      {/* Navigation */}
       <Nav cartCount={cart?.itemCount || 0} onCartOpen={() => setCartOpen(true)} />
 
-      {/* Cart Drawer */}
       <CartDrawer
         open={cartOpen}
         onClose={() => setCartOpen(false)}
@@ -357,13 +390,13 @@ export default function HomePage() {
         {/* ── HERO ───────────────────────────────── */}
         <section className="hero" aria-labelledby="hero-title">
           <div className="hero-content">
-            <p className="hero-eyebrow">New Collection 2024</p>
+            <p className="hero-eyebrow">Multi-Seller Footwear Platform</p>
             <h1 id="hero-title" className="hero-title">
               Move with<br/>
               <span>Purpose</span>
             </h1>
             <p className="hero-desc">
-              Performance footwear engineered for the streets of the Philippines.
+              Performance footwear from verified Filipino merchants, engineered for the streets of the Philippines.
               Every stride counts.
             </p>
             <div className="hero-ctas">
@@ -403,7 +436,7 @@ export default function HomePage() {
             <div className="section-header">
               <div>
                 <h2 id="featured-title" className="section-title">Bestsellers</h2>
-                <p className="section-subtitle">The styles everyone's wearing</p>
+                <p className="section-subtitle">The styles everyone&apos;s wearing</p>
               </div>
               <Link href="/shop?featured=true" className="btn btn-outline">See All</Link>
             </div>
@@ -424,7 +457,6 @@ export default function HomePage() {
             borderRadius: 'var(--radius-xl)',
             overflow: 'hidden',
           }}>
-            {/* Left panel */}
             <div style={{ position: 'relative', minHeight: 480, borderRadius: 'var(--radius-xl)', overflow: 'hidden' }}>
               <img
                 src="/assets/products/running-women-1.jpg"
@@ -438,14 +470,13 @@ export default function HomePage() {
                 padding: 'var(--space-8)'
               }}>
                 <span style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-4xl)', color: '#fff', lineHeight: 1 }}>
-                  Women's<br/>Running
+                  Women&apos;s<br/>Running
                 </span>
                 <Link href="/shop?audience=WOMEN&shoeType=RUNNING" className="btn btn-accent btn-sm" style={{ marginTop: 'var(--space-4)', alignSelf: 'flex-start' }}>
                   Shop Now
                 </Link>
               </div>
             </div>
-            {/* Right panel */}
             <div style={{ position: 'relative', minHeight: 480, borderRadius: 'var(--radius-xl)', overflow: 'hidden' }}>
               <img
                 src="/assets/products/sneaker-women-1.jpg"
@@ -459,7 +490,7 @@ export default function HomePage() {
                 padding: 'var(--space-8)'
               }}>
                 <span style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-4xl)', color: '#fff', lineHeight: 1 }}>
-                  Women's<br/>Lifestyle
+                  Women&apos;s<br/>Lifestyle
                 </span>
                 <Link href="/shop?audience=WOMEN&shoeType=LIFESTYLE" className="btn btn-accent btn-sm" style={{ marginTop: 'var(--space-4)', alignSelf: 'flex-start' }}>
                   Explore
@@ -473,7 +504,7 @@ export default function HomePage() {
         <section className="section" style={{ background: 'var(--color-text)', color: '#fff' }} aria-labelledby="mens-title">
           <div className="container">
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-8)' }}>
-              <h2 id="mens-title" className="section-title" style={{ color: '#fff' }}>Men's Collection</h2>
+              <h2 id="mens-title" className="section-title" style={{ color: '#fff' }}>Men&apos;s Collection</h2>
               <Link href="/shop?audience=MEN" className="btn" style={{ background: 'var(--color-brand-accent)', color: 'var(--color-text)' }}>
                 View All
               </Link>
@@ -483,7 +514,7 @@ export default function HomePage() {
                 { src: '/assets/products/running-men-3.jpg', name: 'Max Energy X', slug: 'stridera-max-energy-x', price: '₱7,495' },
                 { src: '/assets/products/running-men-4.jpg', name: 'Velocity Pro', slug: 'stridera-velocity-pro', price: '₱5,995' },
                 { src: '/assets/products/sneaker-men-1.jpg', name: 'Heritage Classic', slug: 'stridera-heritage-classic', price: '₱6,995' },
-                { src: '/assets/products/running-men-5.jpg', name: 'Aero Sprint', slug: 'stridera-max-energy-x', price: '₱5,495' }
+                { src: '/assets/products/running-men-5.jpg', name: 'Court Dominator', slug: 'stridera-court-dominator', price: '₱6,495' }
               ].map(item => (
                 <Link href={`/products/${item.slug}`} key={item.slug + item.name} style={{ display: 'block' }}>
                   <div style={{
@@ -510,8 +541,8 @@ export default function HomePage() {
             {[
               { icon: '🏃', text: 'Performance Guarantee' },
               { icon: '🚚', text: 'Free Shipping ₱3,000+' },
-              { icon: '↩️', text: '30-Day Returns' },
-              { icon: '🔒', text: 'Secure Payments' },
+              { icon: '↩️', text: '30-Day Returns & Support' },
+              { icon: '🔒', text: 'GCash, Maya & PayPal Ready' },
             ].map(({ icon, text }) => (
               <div key={text} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', color: '#fff', fontWeight: 600, fontSize: 'var(--text-sm)' }}>
                 <span style={{ fontSize: 'var(--text-xl)' }}>{icon}</span>
@@ -530,8 +561,7 @@ export default function HomePage() {
             <div>
               <img src="/assets/logo/stridera-logo.png" alt="STRIDERA" style={{ height: 40, marginBottom: 'var(--space-4)' }} />
               <p className="footer-brand-desc">
-                Premium footwear engineered for Filipino athletes and street style enthusiasts.
-                Every pair is built to perform.
+                Multi-seller performance footwear platform engineered for Filipino athletes and street style enthusiasts.
               </p>
             </div>
             <div>
@@ -554,24 +584,26 @@ export default function HomePage() {
             <div>
               <h3 className="footer-heading">Account</h3>
               <ul className="footer-links" role="list">
-                <li><Link href="/account/login">Sign In</Link></li>
+                <li><Link href="/account/login">Sign In / Switch Role</Link></li>
                 <li><Link href="/account/register">Create Account</Link></li>
+                <li><Link href="/account/profile">My Profile &amp; Support</Link></li>
                 <li><Link href="/account/orders">Order History</Link></li>
               </ul>
             </div>
             <div>
-              <h3 className="footer-heading">Help</h3>
+              <h3 className="footer-heading">Enterprise Portals</h3>
               <ul className="footer-links" role="list">
-                <li><a href="#size-guide">Size Guide</a></li>
-                <li><a href="#returns">Returns</a></li>
-                <li><a href="#shipping">Shipping Info</a></li>
-                <li><a href="#contact">Contact Us</a></li>
+                <li><Link href="/admin/dashboard">Administrator Portal</Link></li>
+                <li><Link href="/inventory">Inventory Manager Portal</Link></li>
+                <li><Link href="/delivery">Delivery Personnel Portal</Link></li>
+                <li><Link href="/support">Customer Support Portal</Link></li>
+                <li><Link href="/finance">Finance Officer Portal</Link></li>
               </ul>
             </div>
           </div>
           <div className="footer-bottom">
             <p>© {new Date().getFullYear()} STRIDERA. All rights reserved. Philippines.</p>
-            <p>Sandbox payments only — no real transactions.</p>
+            <p>7-Role Multi-Seller E-Commerce Platform — Sandbox E-Wallet Processing Enabled.</p>
           </div>
         </div>
       </footer>

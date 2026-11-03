@@ -4,6 +4,9 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import {
   getAdminReports,
+  getAdminUsers,
+  updateAdminUserRole,
+  updateAdminUserStatus,
   getAdminSellers,
   updateAdminSellerStatus,
   assignAdminBrand,
@@ -11,19 +14,40 @@ import {
   createAdminBrand,
   getAdminOrders,
   getAdminConfigStatus,
+  getAdminPlatformConfig,
+  updateAdminPlatformConfig,
   getAdminPaymentLogs,
   getAdminAuditLogs,
   simulatePayment,
   logout
 } from '../../../lib/api';
 
+const ALL_ROLES = [
+  'CUSTOMER',
+  'SELLER',
+  'ADMIN',
+  'INVENTORY_MANAGER',
+  'DELIVERY_PERSONNEL',
+  'CUSTOMER_SUPPORT',
+  'FINANCE_OFFICER'
+];
+
 export default function AdminDashboardPage() {
   const [activeTab, setActiveTab] = useState('overview');
   const [reports, setReports] = useState(null);
+  const [users, setUsers] = useState([]);
   const [sellers, setSellers] = useState([]);
   const [brands, setBrands] = useState([]);
   const [orders, setOrders] = useState([]);
   const [config, setConfig] = useState(null);
+  const [platformConfig, setPlatformConfig] = useState({
+    platformFeePercent: 5,
+    lowStockThreshold: 5,
+    shippingFeeCentavos: 15000,
+    freeShippingThresholdCentavos: 500000,
+    enabledWallets: 'gcash,maya,paypal',
+    sandboxMode: true
+  });
   const [paymentLogs, setPaymentLogs] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -41,21 +65,25 @@ export default function AdminDashboardPage() {
   const loadAll = async () => {
     try {
       setLoading(true);
-      const [repRes, selRes, brRes, ordRes, cfgRes, payRes, audRes] = await Promise.allSettled([
+      const [repRes, usrRes, selRes, brRes, ordRes, cfgRes, pCfgRes, payRes, audRes] = await Promise.allSettled([
         getAdminReports(),
+        getAdminUsers(),
         getAdminSellers(),
         getAdminBrands(),
         getAdminOrders(),
         getAdminConfigStatus(),
+        getAdminPlatformConfig(),
         getAdminPaymentLogs(),
         getAdminAuditLogs()
       ]);
 
       if (repRes.status === 'fulfilled' && repRes.value.success) setReports(repRes.value.data);
+      if (usrRes.status === 'fulfilled' && usrRes.value.success) setUsers(usrRes.value.data);
       if (selRes.status === 'fulfilled' && selRes.value.success) setSellers(selRes.value.data);
       if (brRes.status === 'fulfilled' && brRes.value.success) setBrands(brRes.value.data);
       if (ordRes.status === 'fulfilled' && ordRes.value.success) setOrders(ordRes.value.data);
       if (cfgRes.status === 'fulfilled' && cfgRes.value.success) setConfig(cfgRes.value.data);
+      if (pCfgRes.status === 'fulfilled' && pCfgRes.value.success) setPlatformConfig(pCfgRes.value.data);
       if (payRes.status === 'fulfilled' && payRes.value.success) setPaymentLogs(payRes.value.data);
       if (audRes.status === 'fulfilled' && audRes.value.success) setAuditLogs(audRes.value.data);
     } catch (e) {
@@ -69,6 +97,30 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     loadAll();
   }, []);
+
+  const handleUserRoleChange = async (userId, role) => {
+    try {
+      const res = await updateAdminUserRole(userId, role);
+      if (res.success) {
+        notify(`User role updated to ${role}`);
+        loadAll();
+      }
+    } catch (e) {
+      notify(e.message || 'Role update failed', true);
+    }
+  };
+
+  const handleUserStatusChange = async (userId, accountStatus) => {
+    try {
+      const res = await updateAdminUserStatus(userId, accountStatus);
+      if (res.success) {
+        notify(`User account status updated to ${accountStatus}`);
+        loadAll();
+      }
+    } catch (e) {
+      notify(e.message || 'Account status update failed', true);
+    }
+  };
 
   const handleSellerStatus = async (sellerId, newStatus) => {
     try {
@@ -109,6 +161,19 @@ export default function AdminDashboardPage() {
     }
   };
 
+  const handleSavePlatformConfig = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await updateAdminPlatformConfig(platformConfig);
+      if (res.success) {
+        notify('Platform configuration saved!');
+        setPlatformConfig(res.data);
+      }
+    } catch (e) {
+      notify(e.message || 'Failed to save platform settings', true);
+    }
+  };
+
   const handleSimulatePayment = async (orderNumber) => {
     try {
       const res = await simulatePayment(orderNumber);
@@ -124,10 +189,12 @@ export default function AdminDashboardPage() {
   const handleLogout = async () => {
     try {
       await logout();
-      window.location.href = '/account/login';
     } catch (e) {
       console.error(e);
     }
+    localStorage.removeItem('stridera_token');
+    localStorage.removeItem('stridera_user');
+    window.location.href = '/account/login';
   };
 
   const pendingSellers = sellers.filter(s => s.sellerStatus === 'PENDING');
@@ -153,14 +220,14 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      {/* Admin Top Navigation */}
+      {/* Admin Top Navigation with All 7 Role Portals */}
       <header style={{
         background: '#0F172A',
         color: '#fff',
         padding: 'var(--space-4) 0',
         borderBottom: '1px solid rgba(255,255,255,0.1)'
       }}>
-        <div className="container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-3)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)' }}>
             <Link href="/" style={{ color: '#fff', textDecoration: 'none', fontWeight: 800, fontSize: 'var(--text-lg)', letterSpacing: '0.05em' }}>
               STRIDERA
@@ -174,13 +241,17 @@ export default function AdminDashboardPage() {
               fontWeight: 700,
               textTransform: 'uppercase'
             }}>
-              Platform Admin
+              Platform Admin (Role 3)
             </span>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
             <Link href="/" className="btn btn-ghost btn-sm" style={{ color: '#fff' }}>Storefront</Link>
-            <Link href="/seller/dashboard" className="btn btn-ghost btn-sm" style={{ color: '#fff' }}>Seller Hub</Link>
+            <Link href="/seller/dashboard" className="btn btn-ghost btn-sm" style={{ color: '#fff' }}>Seller Portal</Link>
+            <Link href="/inventory" className="btn btn-ghost btn-sm" style={{ color: '#fff' }}>Inventory Portal</Link>
+            <Link href="/delivery" className="btn btn-ghost btn-sm" style={{ color: '#fff' }}>Delivery Portal</Link>
+            <Link href="/support" className="btn btn-ghost btn-sm" style={{ color: '#fff' }}>Support Portal</Link>
+            <Link href="/finance" className="btn btn-ghost btn-sm" style={{ color: '#fff' }}>Finance Portal</Link>
             <button onClick={handleLogout} className="btn btn-outline btn-sm" style={{ color: '#fff', borderColor: 'rgba(255,255,255,0.3)' }}>
               Sign Out
             </button>
@@ -194,7 +265,7 @@ export default function AdminDashboardPage() {
           <div>
             <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-4xl)' }}>Executive Control Center</h1>
             <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>
-              Multi-seller approval, brand governance, order tracking, and sandbox configuration.
+              7-Role user governance, multi-seller verification, brand governance, order tracking, and platform configuration (FR-10.1–FR-10.10).
             </p>
           </div>
 
@@ -226,10 +297,11 @@ export default function AdminDashboardPage() {
         }}>
           {[
             ['overview', 'Overview & Metrics'],
+            ['users', `Users & 7 Roles (${users.length})`],
             ['sellers', `Merchants & Approvals (${pendingSellers.length})`],
             ['orders', `Orders (${orders.length})`],
             ['brands', `Brands (${brands.length})`],
-            ['config', 'API & Config Status'],
+            ['config', 'Platform Settings & API Config'],
             ['audit', 'Audit Logs']
           ].map(([id, label]) => (
             <button
@@ -263,7 +335,6 @@ export default function AdminDashboardPage() {
             {/* ── TAB 1: OVERVIEW ── */}
             {activeTab === 'overview' && (
               <div>
-                {/* Metric Cards */}
                 <div style={{
                   display: 'grid',
                   gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
@@ -340,11 +411,76 @@ export default function AdminDashboardPage() {
               </div>
             )}
 
-            {/* ── TAB 2: SELLERS & APPROVALS ── */}
+            {/* ── TAB 2: USERS & 7-ROLE GOVERNANCE (FR-10.2, FR-10.4) ── */}
+            {activeTab === 'users' && (
+              <div style={{ background: 'var(--color-surface)', borderRadius: 'var(--radius-xl)', padding: 'var(--space-6)', boxShadow: 'var(--shadow-sm)' }}>
+                <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, marginBottom: 'var(--space-2)' }}>
+                  Platform Users & 7-Role Governance (FR-10.2, FR-10.4)
+                </h2>
+                <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-6)' }}>
+                  Assign roles across all 7 platform personas and activate, suspend, or deactivate user accounts.
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                  {users.map(u => (
+                    <div key={u.id} style={{
+                      padding: 'var(--space-4)',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: 'var(--radius-lg)',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: 'var(--space-4)'
+                    }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                          <span style={{ fontWeight: 700 }}>{u.firstName} {u.lastName}</span>
+                          <span style={{
+                            fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: 'var(--radius-full)',
+                            background: u.accountStatus === 'ACTIVE' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+                            color: u.accountStatus === 'ACTIVE' ? 'var(--color-success)' : 'var(--color-error)'
+                          }}>
+                            {u.accountStatus || 'ACTIVE'}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                          {u.email} {u.storeName ? `• Store: ${u.storeName}` : ''}
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+                        <select
+                          value={u.role}
+                          onChange={e => handleUserRoleChange(u.id, e.target.value)}
+                          style={{ padding: 'var(--space-2)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)', fontSize: 'var(--text-xs)', fontWeight: 700 }}
+                        >
+                          {ALL_ROLES.map(r => (
+                            <option key={r} value={r}>{r}</option>
+                          ))}
+                        </select>
+
+                        <select
+                          value={u.accountStatus || 'ACTIVE'}
+                          onChange={e => handleUserStatusChange(u.id, e.target.value)}
+                          style={{ padding: 'var(--space-2)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)', fontSize: 'var(--text-xs)' }}
+                        >
+                          <option value="ACTIVE">ACTIVE</option>
+                          <option value="SUSPENDED">SUSPENDED</option>
+                          <option value="DEACTIVATED">DEACTIVATED</option>
+                        </select>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ── TAB 3: SELLERS & APPROVALS (FR-10.3) ── */}
             {activeTab === 'sellers' && (
               <div style={{ background: 'var(--color-surface)', borderRadius: 'var(--radius-xl)', padding: 'var(--space-6)', boxShadow: 'var(--shadow-sm)' }}>
                 <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, marginBottom: 'var(--space-4)' }}>
-                  Merchant Partner Applications & Roster
+                  Merchant Partner Applications & Verification (FR-10.3)
                 </h2>
 
                 {sellers.length === 0 ? (
@@ -381,6 +517,12 @@ export default function AdminDashboardPage() {
                             Contact: {s.firstName} {s.lastName} ({s.email}) &bull; Phone: {s.phone || 'N/A'}
                           </div>
 
+                          {s.identificationDetails && (
+                            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-brand-primary)', marginTop: '4px', fontWeight: 600 }}>
+                              🪪 Business / DTI / TIN Verification: {s.identificationDetails}
+                            </div>
+                          )}
+
                           {s.storeDescription && (
                             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', marginTop: 'var(--space-1)', fontStyle: 'italic' }}>
                               "{s.storeDescription}"
@@ -414,7 +556,6 @@ export default function AdminDashboardPage() {
 
                           {s.sellerStatus === 'APPROVED' && (
                             <>
-                              {/* Brand Selector */}
                               <select
                                 style={{ padding: 'var(--space-1) var(--space-2)', fontSize: 'var(--text-xs)', borderRadius: 'var(--radius-sm)' }}
                                 onChange={(e) => { if (e.target.value) handleAssignBrand(s.id, e.target.value); }}
@@ -452,7 +593,7 @@ export default function AdminDashboardPage() {
               </div>
             )}
 
-            {/* ── TAB 3: ORDERS ── */}
+            {/* ── TAB 4: ORDERS ── */}
             {activeTab === 'orders' && (
               <div style={{ background: 'var(--color-surface)', borderRadius: 'var(--radius-xl)', padding: 'var(--space-6)', boxShadow: 'var(--shadow-sm)' }}>
                 <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, marginBottom: 'var(--space-4)' }}>Platform Orders</h2>
@@ -514,7 +655,7 @@ export default function AdminDashboardPage() {
               </div>
             )}
 
-            {/* ── TAB 4: BRANDS ── */}
+            {/* ── TAB 5: BRANDS ── */}
             {activeTab === 'brands' && (
               <div style={{ background: 'var(--color-surface)', borderRadius: 'var(--radius-xl)', padding: 'var(--space-6)', boxShadow: 'var(--shadow-sm)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-4)' }}>
@@ -545,81 +686,133 @@ export default function AdminDashboardPage() {
               </div>
             )}
 
-            {/* ── TAB 5: API & CONFIG STATUS (Per Skill §4) ── */}
+            {/* ── TAB 6: PLATFORM SETTINGS & API CONFIG (FR-10.9) ── */}
             {activeTab === 'config' && (
-              <div style={{ background: 'var(--color-surface)', borderRadius: 'var(--radius-xl)', padding: 'var(--space-6)', boxShadow: 'var(--shadow-sm)' }}>
-                <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, marginBottom: 'var(--space-2)' }}>
-                  Platform Environment & API Gateway Status
-                </h2>
-                <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-6)' }}>
-                  Read-only configuration audit. Per architecture rules, secret keys are never editable or persisted in the database.
-                </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+                {/* Editable Platform Settings Form (FR-10.9) */}
+                <div style={{ background: 'var(--color-surface)', borderRadius: 'var(--radius-xl)', padding: 'var(--space-6)', boxShadow: 'var(--shadow-sm)' }}>
+                  <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, marginBottom: 'var(--space-2)' }}>
+                    Platform Governance & E-Wallet Settings (FR-10.9)
+                  </h2>
+                  <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-4)' }}>
+                    Configure marketplace commission percentage, low-stock threshold, shipping fees, and active e-wallet providers.
+                  </p>
 
-                {config && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 'var(--space-4)' }}>
-                      <div style={{ padding: 'var(--space-4)', background: 'var(--color-surface-raised)', borderRadius: 'var(--radius-md)' }}>
-                        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>System Runtime</div>
-                        <div style={{ fontWeight: 700, marginTop: 'var(--space-1)' }}>Environment: {config.environment}</div>
-                        <div style={{ fontSize: 'var(--text-xs)' }}>Server Port: {config.port}</div>
-                        <div style={{ fontSize: 'var(--text-xs)' }}>Frontend Origin: {config.frontendUrl}</div>
-                      </div>
-
-                      <div style={{ padding: 'var(--space-4)', background: 'var(--color-surface-raised)', borderRadius: 'var(--radius-md)' }}>
-                        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>Database Driver</div>
-                        <div style={{ fontWeight: 700, marginTop: 'var(--space-1)' }}>Connected: {config.database.configured ? 'YES' : 'NO'}</div>
-                        <div style={{ fontSize: 'var(--text-xs)', fontFamily: 'monospace' }}>{config.database.connection}</div>
-                      </div>
-
-                      <div style={{ padding: 'var(--space-4)', background: 'var(--color-surface-raised)', borderRadius: 'var(--radius-md)' }}>
-                        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>PayMongo E-Wallet Gateway</div>
-                        <div style={{ fontWeight: 700, marginTop: 'var(--space-1)' }}>Mode: {config.paymentGateway.mode}</div>
-                        <div style={{ fontSize: 'var(--text-xs)' }}>Secret Key: <code style={{ fontFamily: 'monospace' }}>{config.paymentGateway.secretKeyMasked}</code></div>
-                        <div style={{ fontSize: 'var(--text-xs)' }}>Webhook Secret: <code style={{ fontFamily: 'monospace' }}>{config.paymentGateway.webhookSecretMasked}</code></div>
-                      </div>
-
-                      <div style={{ padding: 'var(--space-4)', background: 'var(--color-surface-raised)', borderRadius: 'var(--radius-md)' }}>
-                        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>Demo Safety Fallback</div>
-                        <div style={{ fontWeight: 700, marginTop: 'var(--space-1)' }}>{config.demoSafetyFallback.mode}</div>
-                        <div style={{ fontSize: 'var(--text-xs)' }}>Default Shipping: {config.shipping.defaultFeeFormatted}</div>
-                      </div>
+                  <form onSubmit={handleSavePlatformConfig} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 'var(--space-4)' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 700, marginBottom: '4px' }}>Platform Commission (%)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="50"
+                        value={platformConfig.platformFeePercent}
+                        onChange={e => setPlatformConfig({ ...platformConfig, platformFeePercent: Number(e.target.value) })}
+                        style={{ width: '100%', padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                      />
                     </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 700, marginBottom: '4px' }}>Low-Stock Alert Threshold</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        value={platformConfig.lowStockThreshold}
+                        onChange={e => setPlatformConfig({ ...platformConfig, lowStockThreshold: Number(e.target.value) })}
+                        style={{ width: '100%', padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 700, marginBottom: '4px' }}>Enabled E-Wallets</label>
+                      <input
+                        type="text"
+                        value={platformConfig.enabledWallets}
+                        onChange={e => setPlatformConfig({ ...platformConfig, enabledWallets: e.target.value })}
+                        style={{ width: '100%', padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+                      <button type="submit" className="btn btn-primary btn-sm" style={{ width: '100%', padding: 'var(--space-3)' }}>
+                        Save Platform Settings
+                      </button>
+                    </div>
+                  </form>
+                </div>
 
-                    {/* Payment Transactions & Webhook Audit Trail */}
-                    <div style={{ marginTop: 'var(--space-6)' }}>
-                      <h3 style={{ fontSize: 'var(--text-base)', fontWeight: 700, marginBottom: 'var(--space-3)' }}>
-                        Payment Transaction & Webhook Deduplication Log
-                      </h3>
-                      {paymentLogs.length === 0 ? (
-                        <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>No payment transactions recorded.</p>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-                          {paymentLogs.map(p => (
-                            <div key={p.id} style={{
-                              padding: 'var(--space-2) var(--space-3)',
-                              border: '1px solid var(--color-border)',
-                              borderRadius: 'var(--radius-sm)',
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              fontSize: 'var(--text-xs)'
-                            }}>
-                              <span>
-                                Order: <strong>{p.order?.orderNumber}</strong> ({p.amountFormatted}) &bull; Provider: {p.provider} {p.isDemo ? '(SIMULATED)' : ''}
-                              </span>
-                              <span>
-                                Status: <strong style={{ color: p.status === 'PAID' ? 'var(--color-success)' : 'inherit' }}>{p.status}</strong> &bull; Idempotency: {p.idempotencyKey.slice(0, 12)}...
-                              </span>
-                            </div>
-                          ))}
+                {/* Read-only API & Secret Status */}
+                <div style={{ background: 'var(--color-surface)', borderRadius: 'var(--radius-xl)', padding: 'var(--space-6)', boxShadow: 'var(--shadow-sm)' }}>
+                  <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, marginBottom: 'var(--space-2)' }}>
+                    Platform Environment & API Gateway Status
+                  </h2>
+                  <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-6)' }}>
+                    Read-only secret key audit. Per architecture rules, secret keys are never editable or persisted in the database.
+                  </p>
+
+                  {config && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 'var(--space-4)' }}>
+                        <div style={{ padding: 'var(--space-4)', background: 'var(--color-surface-raised)', borderRadius: 'var(--radius-md)' }}>
+                          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>System Runtime</div>
+                          <div style={{ fontWeight: 700, marginTop: 'var(--space-1)' }}>Environment: {config.environment}</div>
+                          <div style={{ fontSize: 'var(--text-xs)' }}>Server Port: {config.port}</div>
+                          <div style={{ fontSize: 'var(--text-xs)' }}>Frontend Origin: {config.frontendUrl}</div>
                         </div>
-                      )}
+
+                        <div style={{ padding: 'var(--space-4)', background: 'var(--color-surface-raised)', borderRadius: 'var(--radius-md)' }}>
+                          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>Database Driver</div>
+                          <div style={{ fontWeight: 700, marginTop: 'var(--space-1)' }}>Connected: {config.database.configured ? 'YES' : 'NO'}</div>
+                          <div style={{ fontSize: 'var(--text-xs)', fontFamily: 'monospace' }}>{config.database.connection}</div>
+                        </div>
+
+                        <div style={{ padding: 'var(--space-4)', background: 'var(--color-surface-raised)', borderRadius: 'var(--radius-md)' }}>
+                          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>PayMongo E-Wallet Gateway</div>
+                          <div style={{ fontWeight: 700, marginTop: 'var(--space-1)' }}>Mode: {config.paymentGateway.mode}</div>
+                          <div style={{ fontSize: 'var(--text-xs)' }}>Secret Key: <code style={{ fontFamily: 'monospace' }}>{config.paymentGateway.secretKeyMasked}</code></div>
+                          <div style={{ fontSize: 'var(--text-xs)' }}>Webhook Secret: <code style={{ fontFamily: 'monospace' }}>{config.paymentGateway.webhookSecretMasked}</code></div>
+                        </div>
+
+                        <div style={{ padding: 'var(--space-4)', background: 'var(--color-surface-raised)', borderRadius: 'var(--radius-md)' }}>
+                          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>Demo Safety Fallback</div>
+                          <div style={{ fontWeight: 700, marginTop: 'var(--space-1)' }}>{config.demoSafetyFallback.mode}</div>
+                          <div style={{ fontSize: 'var(--text-xs)' }}>Default Shipping: {config.shipping.defaultFeeFormatted}</div>
+                        </div>
+                      </div>
+
+                      {/* Payment Transactions & Webhook Audit Trail */}
+                      <div style={{ marginTop: 'var(--space-6)' }}>
+                        <h3 style={{ fontSize: 'var(--text-base)', fontWeight: 700, marginBottom: 'var(--space-3)' }}>
+                          Payment Transaction & Webhook Deduplication Log
+                        </h3>
+                        {paymentLogs.length === 0 ? (
+                          <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>No payment transactions recorded.</p>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+                            {paymentLogs.map(p => (
+                              <div key={p.id} style={{
+                                padding: 'var(--space-2) var(--space-3)',
+                                border: '1px solid var(--color-border)',
+                                borderRadius: 'var(--radius-sm)',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                fontSize: 'var(--text-xs)'
+                              }}>
+                                <span>
+                                  Order: <strong>{p.order?.orderNumber}</strong> ({p.amountFormatted}) &bull; Provider: {p.provider} {p.isDemo ? '(SIMULATED)' : ''}
+                                </span>
+                                <span>
+                                  Status: <strong style={{ color: p.status === 'PAID' ? 'var(--color-success)' : 'inherit' }}>{p.status}</strong> &bull; Idempotency: {p.idempotencyKey.slice(0, 12)}...
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             )}
 
-            {/* ── TAB 6: AUDIT LOGS ── */}
+            {/* ── TAB 7: AUDIT LOGS ── */}
             {activeTab === 'audit' && (
               <div style={{ background: 'var(--color-surface)', borderRadius: 'var(--radius-xl)', padding: 'var(--space-6)', boxShadow: 'var(--shadow-sm)' }}>
                 <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, marginBottom: 'var(--space-4)' }}>Platform Audit Trail</h2>
@@ -714,4 +907,3 @@ export default function AdminDashboardPage() {
     </div>
   );
 }
-

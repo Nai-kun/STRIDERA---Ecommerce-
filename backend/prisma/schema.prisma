@@ -1,5 +1,5 @@
 // Prisma Schema — STRIDERA E-Commerce Database
-// This schema matches the ERD in contents/diagrams/erd.mmd
+// Aligned with source/IPT.pdf (7 User Roles, Features 1–10, Proposed Data Model & Enterprise Extensions)
 
 generator client {
   provider = "prisma-client-js"
@@ -13,6 +13,16 @@ enum UserRole {
   CUSTOMER
   SELLER
   ADMIN
+  INVENTORY_MANAGER
+  DELIVERY_PERSONNEL
+  CUSTOMER_SUPPORT
+  FINANCE_OFFICER
+}
+
+enum AccountStatus {
+  ACTIVE
+  DEACTIVATED
+  SUSPENDED
 }
 
 enum SellerStatus {
@@ -25,6 +35,8 @@ enum SellerStatus {
 enum SellerOrderStatus {
   PENDING
   PAID
+  CONFIRMED
+  PREPARING
   SHIPPED
   DELIVERED
   CANCELLED
@@ -41,6 +53,8 @@ enum ShoeType {
   LIFESTYLE
   BASKETBALL
   TRAINING
+  CASUAL
+  BOOTS
 }
 
 enum OrderStatus {
@@ -50,6 +64,8 @@ enum OrderStatus {
   SHIPPED
   DELIVERED
   CANCELLED
+  RETURN_REQUESTED
+  RETURNED
 }
 
 enum PaymentStatus {
@@ -65,7 +81,10 @@ enum ShippingStatus {
   PREPARING
   SHIPPED
   IN_TRANSIT
+  OUT_FOR_DELIVERY
   DELIVERED
+  FAILED
+  RETURN_PENDING
 }
 
 enum PaymentProviderStatus {
@@ -74,14 +93,19 @@ enum PaymentProviderStatus {
   FAILED
   CANCELLED
   EXPIRED
+  REFUNDED
 }
 
 enum ShipmentStatus {
   PREPARING
+  ASSIGNED
+  COLLECTED
   SHIPPED
   IN_TRANSIT
+  OUT_FOR_DELIVERY
   DELIVERED
   FAILED
+  RETURN_PENDING
 }
 
 enum DiscountType {
@@ -89,29 +113,68 @@ enum DiscountType {
   PERCENTAGE
 }
 
-model User {
-  id               String        @id @default(uuid()) @db.Uuid
-  email            String        @unique
-  passwordHash     String        @map("password_hash")
-  firstName        String        @map("first_name")
-  lastName         String        @map("last_name")
-  phone            String?
-  role             UserRole      @default(CUSTOMER)
-  isActive         Boolean       @default(true) @map("is_active")
-  sellerStatus     SellerStatus? @map("seller_status")
-  storeName        String?       @map("store_name")
-  storeDescription String?       @map("store_description") @db.Text
-  createdAt        DateTime      @default(now()) @map("created_at")
-  updatedAt        DateTime      @updatedAt @map("updated_at")
+enum TicketCategory {
+  INQUIRY
+  COMPLAINT
+  CANCELLATION
+  RETURN
+  REFUND
+}
 
-  addresses     Address[]
-  carts         Cart[]
-  orders        Order[]
-  wishlistItems WishlistItem[]
-  auditLogs     AuditLog[]
-  brand         Brand?
-  sellerOrders  SellerOrder[]
-  products      Product[]      @relation("SellerProducts")
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum RefundStatus {
+  NONE
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
+}
+
+enum PayoutStatus {
+  PENDING
+  COMPLETED
+  SIMULATED
+}
+
+model User {
+  id                    String        @id @default(uuid()) @db.Uuid
+  email                 String        @unique
+  passwordHash          String        @map("password_hash")
+  firstName             String        @map("first_name")
+  lastName              String        @map("last_name")
+  phone                 String?
+  role                  UserRole      @default(CUSTOMER)
+  isActive              Boolean       @default(true) @map("is_active")
+  accountStatus         AccountStatus @default(ACTIVE) @map("account_status")
+  sellerStatus          SellerStatus? @map("seller_status")
+  storeName             String?       @map("store_name")
+  storeDescription      String?       @map("store_description") @db.Text
+  storeLogoUrl          String?       @map("store_logo_url")
+  identificationDetails String?       @map("identification_details") @db.Text
+  createdAt             DateTime      @default(now()) @map("created_at")
+  updatedAt             DateTime      @updatedAt @map("updated_at")
+
+  addresses         Address[]
+  carts             Cart[]
+  orders            Order[]
+  wishlistItems     WishlistItem[]
+  auditLogs         AuditLog[]
+  brand             Brand?
+  sellerOrders      SellerOrder[]
+  products          Product[]        @relation("SellerProducts")
+  assignedShipments Shipment[]       @relation("DeliveryAssignee")
+  supportTickets    SupportTicket[]  @relation("CustomerTickets")
+  assignedTickets   SupportTicket[]  @relation("SupportAssignee")
+  supportMessages   SupportMessage[]
+  sellerPayouts     SellerPayout[]   @relation("SellerPayouts")
+  processedPayouts  SellerPayout[]   @relation("FinanceProcessor")
+  reviews           ProductReview[]
 
   @@map("users")
 }
@@ -188,12 +251,13 @@ model Product {
   createdAt              DateTime  @default(now()) @map("created_at")
   updatedAt              DateTime  @updatedAt @map("updated_at")
 
-  category      Category        @relation(fields: [categoryId], references: [id])
-  seller        User?           @relation("SellerProducts", fields: [sellerId], references: [id])
-  brand         Brand?          @relation(fields: [brandId], references: [id])
+  category      Category         @relation(fields: [categoryId], references: [id])
+  seller        User?            @relation("SellerProducts", fields: [sellerId], references: [id])
+  brand         Brand?           @relation(fields: [brandId], references: [id])
   variants      ProductVariant[]
   images        ProductImage[]
   wishlistItems WishlistItem[]
+  reviews       ProductReview[]
 
   @@index([categoryId])
   @@index([sellerId])
@@ -213,6 +277,7 @@ model ProductVariant {
   colorHex              String?  @map("color_hex")
   priceOverrideCentavos Int?     @map("price_override_centavos")
   stockQuantity         Int      @default(0) @map("stock_quantity")
+  lowStockThreshold     Int      @default(5) @map("low_stock_threshold")
   isActive              Boolean  @default(true) @map("is_active")
   createdAt             DateTime @default(now()) @map("created_at")
   updatedAt             DateTime @updatedAt @map("updated_at")
@@ -241,6 +306,24 @@ model ProductImage {
 
   @@index([productId])
   @@map("product_images")
+}
+
+model ProductReview {
+  id           String   @id @default(uuid()) @db.Uuid
+  productId    String   @map("product_id") @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  orderNumber  String?  @map("order_number")
+  rating       Int      @default(5)
+  sellerRating Int?     @default(5) @map("seller_rating")
+  comment      String   @db.Text
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([userId])
+  @@map("product_reviews")
 }
 
 model Cart {
@@ -281,6 +364,7 @@ model Order {
   guestEmail            String?        @map("guest_email")
   orderStatus           OrderStatus    @default(PENDING) @map("order_status")
   paymentStatus         PaymentStatus  @default(UNPAID) @map("payment_status")
+  paymentMethod         String?        @default("gcash") @map("payment_method")
   shippingStatus        ShippingStatus @default(UNFULFILLED) @map("shipping_status")
   subtotalCentavos      Int            @map("subtotal_centavos")
   discountTotalCentavos Int            @default(0) @map("discount_total_centavos")
@@ -296,15 +380,17 @@ model Order {
   shippingCountry       String?        @map("shipping_country")
   promotionId           String?        @map("promotion_id") @db.Uuid
   notes                 String?        @db.Text
+  receivedConfirmedAt   DateTime?      @map("received_confirmed_at")
   createdAt             DateTime       @default(now()) @map("created_at")
   updatedAt             DateTime       @updatedAt @map("updated_at")
 
-  user      User?      @relation(fields: [userId], references: [id])
-  promotion Promotion? @relation(fields: [promotionId], references: [id])
-  items     OrderItem[]
-  payments  Payment[]
-  shipments Shipment[]
-  sellerOrders SellerOrder[]
+  user           User?           @relation(fields: [userId], references: [id])
+  promotion      Promotion?      @relation(fields: [promotionId], references: [id])
+  items          OrderItem[]
+  payments       Payment[]
+  shipments      Shipment[]
+  sellerOrders   SellerOrder[]
+  supportTickets SupportTicket[]
 
   @@index([userId])
   @@index([orderStatus])
@@ -337,6 +423,7 @@ model Payment {
   id                  String                @id @default(uuid()) @db.Uuid
   orderId             String                @map("order_id") @db.Uuid
   provider            String                @default("paymongo")
+  paymentMethod       String?               @default("gcash") @map("payment_method")
   providerPaymentId   String?               @map("provider_payment_id")
   providerCheckoutUrl String?               @map("provider_checkout_url")
   idempotencyKey      String                @unique @map("idempotency_key")
@@ -346,6 +433,9 @@ model Payment {
   isDemo              Boolean               @default(false) @map("is_demo")
   webhookEventId      String?               @map("webhook_event_id")
   verifiedAt          DateTime?             @map("verified_at")
+  financeVerified     Boolean               @default(false) @map("finance_verified")
+  financeVerifiedBy   String?               @map("finance_verified_by")
+  financeVerifiedAt   DateTime?             @map("finance_verified_at")
   createdAt           DateTime              @default(now()) @map("created_at")
   updatedAt           DateTime              @updatedAt @map("updated_at")
 
@@ -356,63 +446,158 @@ model Payment {
 }
 
 model Shipment {
-  id                String         @id @default(uuid()) @db.Uuid
-  orderId           String         @map("order_id") @db.Uuid
-  carrier           String?
-  trackingNumber    String?        @map("tracking_number")
-  trackingUrl       String?        @map("tracking_url")
-  status            ShipmentStatus @default(PREPARING)
-  shippingFeeCentavos Int?         @map("shipping_fee_centavos")
-  notes             String?        @db.Text
-  shippedAt         DateTime?      @map("shipped_at")
-  deliveredAt       DateTime?      @map("delivered_at")
-  createdAt         DateTime       @default(now()) @map("created_at")
-  updatedAt         DateTime       @updatedAt @map("updated_at")
+  id                  String         @id @default(uuid()) @db.Uuid
+  orderId             String         @map("order_id") @db.Uuid
+  sellerOrderId       String?        @map("seller_order_id") @db.Uuid
+  deliveryPersonnelId String?        @map("delivery_personnel_id") @db.Uuid
+  carrier             String?
+  trackingNumber      String?        @map("tracking_number")
+  trackingUrl         String?        @map("tracking_url")
+  status              ShipmentStatus @default(PREPARING)
+  shippingFeeCentavos Int?           @map("shipping_fee_centavos")
+  notes               String?        @db.Text
+  proofOfDeliveryUrl  String?        @map("proof_of_delivery_url")
+  recipientName       String?        @map("recipient_name")
+  failureReason       String?        @map("failure_reason") @db.Text
+  history             Json?
+  acceptedAt          DateTime?      @map("accepted_at")
+  collectedAt         DateTime?      @map("collected_at")
+  shippedAt           DateTime?      @map("shipped_at")
+  deliveredAt         DateTime?      @map("delivered_at")
+  createdAt           DateTime       @default(now()) @map("created_at")
+  updatedAt           DateTime       @updatedAt @map("updated_at")
 
-  order Order @relation(fields: [orderId], references: [id])
+  order             Order        @relation(fields: [orderId], references: [id])
+  sellerOrder       SellerOrder? @relation(fields: [sellerOrderId], references: [id])
+  deliveryPersonnel User?        @relation("DeliveryAssignee", fields: [deliveryPersonnelId], references: [id])
 
   @@index([orderId])
+  @@index([deliveryPersonnelId])
   @@map("shipments")
 }
 
 model SellerOrder {
-  id                String            @id @default(uuid()) @db.Uuid
-  orderId           String            @map("order_id") @db.Uuid
-  sellerId          String            @map("seller_id") @db.Uuid
-  subtotalCentavos  Int               @map("subtotal_centavos")
-  status            SellerOrderStatus @default(PENDING)
-  trackingNumber    String?           @map("tracking_number")
-  trackingUrl       String?           @map("tracking_url")
-  shippedAt         DateTime?         @map("shipped_at")
-  deliveredAt       DateTime?         @map("delivered_at")
-  notes             String?           @db.Text
-  createdAt         DateTime          @default(now()) @map("created_at")
-  updatedAt         DateTime          @updatedAt @map("updated_at")
+  id               String            @id @default(uuid()) @db.Uuid
+  orderId          String            @map("order_id") @db.Uuid
+  sellerId         String            @map("seller_id") @db.Uuid
+  subtotalCentavos Int               @map("subtotal_centavos")
+  status           SellerOrderStatus @default(PENDING)
+  carrier          String?
+  trackingNumber   String?           @map("tracking_number")
+  trackingUrl      String?           @map("tracking_url")
+  acceptedAt       DateTime?         @map("accepted_at")
+  shippedAt        DateTime?         @map("shipped_at")
+  deliveredAt      DateTime?         @map("delivered_at")
+  notes            String?           @db.Text
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
 
-  order  Order       @relation(fields: [orderId], references: [id])
-  seller User        @relation(fields: [sellerId], references: [id])
-  items  OrderItem[]
+  order     Order       @relation(fields: [orderId], references: [id])
+  seller    User        @relation(fields: [sellerId], references: [id])
+  items     OrderItem[]
+  shipments Shipment[]
 
   @@index([orderId])
   @@index([sellerId])
   @@map("seller_orders")
 }
 
+model SupportTicket {
+  id                   String         @id @default(uuid()) @db.Uuid
+  ticketNumber         String         @unique @map("ticket_number")
+  userId               String         @map("user_id") @db.Uuid
+  orderId              String?        @map("order_id") @db.Uuid
+  sellerId             String?        @map("seller_id") @db.Uuid
+  assignedToId         String?        @map("assigned_to_id") @db.Uuid
+  category             TicketCategory @default(INQUIRY)
+  subject              String
+  description          String         @db.Text
+  status               TicketStatus   @default(OPEN)
+  priority             String         @default("MEDIUM")
+  refundAmountCentavos Int?           @map("refund_amount_centavos")
+  refundStatus         RefundStatus   @default(NONE) @map("refund_status")
+  resolutionNotes      String?        @map("resolution_notes") @db.Text
+  createdAt            DateTime       @default(now()) @map("created_at")
+  updatedAt            DateTime       @updatedAt @map("updated_at")
+
+  user       User             @relation("CustomerTickets", fields: [userId], references: [id])
+  order      Order?           @relation(fields: [orderId], references: [id])
+  assignedTo User?            @relation("SupportAssignee", fields: [assignedToId], references: [id])
+  messages   SupportMessage[]
+
+  @@index([userId])
+  @@index([orderId])
+  @@index([status])
+  @@map("support_tickets")
+}
+
+model SupportMessage {
+  id         String   @id @default(uuid()) @db.Uuid
+  ticketId   String   @map("ticket_id") @db.Uuid
+  senderId   String   @map("sender_id") @db.Uuid
+  senderRole String   @map("sender_role")
+  senderName String   @map("sender_name")
+  message    String   @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  sender User          @relation(fields: [senderId], references: [id])
+
+  @@index([ticketId])
+  @@map("support_messages")
+}
+
+model SellerPayout {
+  id                  String       @id @default(uuid()) @db.Uuid
+  payoutNumber        String       @unique @map("payout_number")
+  sellerId            String       @map("seller_id") @db.Uuid
+  grossSalesCentavos  Int          @map("gross_sales_centavos")
+  platformFeePercent  Int          @default(5) @map("platform_fee_percent")
+  platformFeeCentavos Int          @map("platform_fee_centavos")
+  netAmountCentavos   Int          @map("net_amount_centavos")
+  provider            String       @default("gcash")
+  referenceNumber     String       @map("reference_number")
+  status              PayoutStatus @default(COMPLETED)
+  processedById       String?      @map("processed_by_id") @db.Uuid
+  notes               String?      @db.Text
+  createdAt           DateTime     @default(now()) @map("created_at")
+  updatedAt           DateTime     @updatedAt @map("updated_at")
+
+  seller      User  @relation("SellerPayouts", fields: [sellerId], references: [id])
+  processedBy User? @relation("FinanceProcessor", fields: [processedById], references: [id])
+
+  @@index([sellerId])
+  @@map("seller_payouts")
+}
+
+model PlatformConfig {
+  id                            String   @id @default("default")
+  platformFeePercent            Int      @default(5) @map("platform_fee_percent")
+  lowStockThreshold             Int      @default(5) @map("low_stock_threshold")
+  shippingFeeCentavos           Int      @default(15000) @map("shipping_fee_centavos")
+  freeShippingThresholdCentavos Int      @default(300000) @map("free_shipping_threshold_centavos")
+  enabledWallets                String   @default("gcash,maya,paypal") @map("enabled_wallets")
+  sandboxMode                   Boolean  @default(true) @map("sandbox_mode")
+  updatedAt                     DateTime @updatedAt @map("updated_at")
+
+  @@map("platform_configs")
+}
+
 model Promotion {
-  id               String       @id @default(uuid()) @db.Uuid
-  code             String       @unique
-  description      String?
-  discountType     DiscountType @map("discount_type")
-  discountValue    Int          @map("discount_value")
-  minOrderCentavos Int?         @map("min_order_centavos")
-  maxDiscountCentavos Int?      @map("max_discount_centavos")
-  usageLimit       Int?         @map("usage_limit")
-  timesUsed        Int          @default(0) @map("times_used")
-  startsAt         DateTime?    @map("starts_at")
-  expiresAt        DateTime?    @map("expires_at")
-  isActive         Boolean      @default(true) @map("is_active")
-  createdAt        DateTime     @default(now()) @map("created_at")
-  updatedAt        DateTime     @updatedAt @map("updated_at")
+  id                  String       @id @default(uuid()) @db.Uuid
+  code                String       @unique
+  description         String?
+  discountType        DiscountType @map("discount_type")
+  discountValue       Int          @map("discount_value")
+  minOrderCentavos    Int?         @map("min_order_centavos")
+  maxDiscountCentavos Int?         @map("max_discount_centavos")
+  usageLimit          Int?         @map("usage_limit")
+  timesUsed           Int          @default(0) @map("times_used")
+  startsAt            DateTime?    @map("starts_at")
+  expiresAt           DateTime?    @map("expires_at")
+  isActive            Boolean      @default(true) @map("is_active")
+  createdAt           DateTime     @default(now()) @map("created_at")
+  updatedAt           DateTime     @updatedAt @map("updated_at")
 
   orders Order[]
 
@@ -433,13 +618,14 @@ model WishlistItem {
 }
 
 model StockMovement {
-  id              String   @id @default(uuid()) @db.Uuid
-  productVariantId String  @map("product_variant_id") @db.Uuid
-  quantityChange  Int      @map("quantity_change")
-  stockAfter      Int      @map("stock_after")
-  reason          String
-  referenceId     String?  @map("reference_id") @db.Uuid
-  createdAt       DateTime @default(now()) @map("created_at")
+  id               String   @id @default(uuid()) @db.Uuid
+  productVariantId String   @map("product_variant_id") @db.Uuid
+  quantityChange   Int      @map("quantity_change")
+  stockAfter       Int      @map("stock_after")
+  movementType     String   @default("ADJUSTMENT") @map("movement_type")
+  reason           String
+  referenceId      String?  @map("reference_id")
+  createdAt        DateTime @default(now()) @map("created_at")
 
   productVariant ProductVariant @relation(fields: [productVariantId], references: [id])
 
@@ -452,7 +638,7 @@ model AuditLog {
   userId     String?  @map("user_id") @db.Uuid
   action     String
   entityType String?  @map("entity_type")
-  entityId   String?  @map("entity_id") @db.Uuid
+  entityId   String?  @map("entity_id")
   oldValues  Json?    @map("old_values")
   newValues  Json?    @map("new_values")
   ipAddress  String?  @map("ip_address")

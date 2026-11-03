@@ -1,8 +1,8 @@
-// Product Routes — Catalog, Search, PDP
+// Product Routes — Multi-Seller Catalog, Search, Filters, PDP, Reviews (FR-2.1 to FR-2.12)
 const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
-const { optionalAuth } = require('../middleware/auth.middleware');
+const { authenticate, optionalAuth } = require('../middleware/auth.middleware');
 
 // GET /api/products — List products with filters, search, sort, pagination
 router.get('/', optionalAuth, async (req, res, next) => {
@@ -12,6 +12,7 @@ router.get('/', optionalAuth, async (req, res, next) => {
       limit = 12,
       category,
       brand,
+      seller,
       audience,
       shoeType,
       search,
@@ -25,9 +26,8 @@ router.get('/', optionalAuth, async (req, res, next) => {
     } = req.query;
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
-    const take = Math.min(parseInt(limit), 48); // Cap at 48
+    const take = Math.min(parseInt(limit), 48);
 
-    // Build where clause
     const where = { isActive: true };
 
     if (category) {
@@ -35,6 +35,9 @@ router.get('/', optionalAuth, async (req, res, next) => {
     }
     if (brand) {
       where.brand = { slug: brand };
+    }
+    if (seller) {
+      where.sellerId = seller;
     }
     if (audience) {
       where.audience = audience.toUpperCase();
@@ -47,18 +50,18 @@ router.get('/', optionalAuth, async (req, res, next) => {
         { name: { contains: search, mode: 'insensitive' } },
         { description: { contains: search, mode: 'insensitive' } },
         { sku: { contains: search, mode: 'insensitive' } },
+        { seller: { storeName: { contains: search, mode: 'insensitive' } } },
       ];
     }
     if (minPrice || maxPrice) {
       where.basePriceCentavos = {};
-      if (minPrice) where.basePriceCentavos.gte = parseInt(minPrice) * 100;
-      if (maxPrice) where.basePriceCentavos.lte = parseInt(maxPrice) * 100;
+      if (minPrice) where.basePriceCentavos.gte = Math.round(parseFloat(minPrice) * 100);
+      if (maxPrice) where.basePriceCentavos.lte = Math.round(parseFloat(maxPrice) * 100);
     }
     if (featured === 'true') {
       where.isFeatured = true;
     }
 
-    // Filter by color or size through variants
     if (color || size || inStock === 'true') {
       where.variants = { some: { isActive: true } };
       if (color) where.variants.some.color = { contains: color, mode: 'insensitive' };
@@ -66,16 +69,18 @@ router.get('/', optionalAuth, async (req, res, next) => {
       if (inStock === 'true') where.variants.some.stockQuantity = { gt: 0 };
     }
 
-    // Sort options
     let orderBy;
     switch (sort) {
       case 'price-asc':
+      case 'price_asc':
         orderBy = { basePriceCentavos: 'asc' };
         break;
       case 'price-desc':
+      case 'price_desc':
         orderBy = { basePriceCentavos: 'desc' };
         break;
       case 'name-asc':
+      case 'name_asc':
         orderBy = { name: 'asc' };
         break;
       case 'oldest':
@@ -96,19 +101,18 @@ router.get('/', optionalAuth, async (req, res, next) => {
         include: {
           category: { select: { id: true, name: true, slug: true } },
           brand: { select: { id: true, name: true, slug: true, logoUrl: true } },
-          seller: { select: { id: true, storeName: true } },
+          seller: { select: { id: true, storeName: true, storeLogoUrl: true } },
           images: { where: { isPrimary: true }, take: 1 },
           variants: {
             where: { isActive: true },
             select: { id: true, size: true, color: true, colorHex: true, stockQuantity: true, priceOverrideCentavos: true },
           },
-          _count: { select: { wishlistItems: true } },
+          _count: { select: { wishlistItems: true, reviews: true } },
         },
       }),
       prisma.product.count({ where }),
     ]);
 
-    // Transform response
     const formattedProducts = products.map(p => ({
       id: p.id,
       name: p.name,
@@ -128,6 +132,7 @@ router.get('/', optionalAuth, async (req, res, next) => {
       availableSizes: [...new Set(p.variants.map(v => v.size))],
       totalStock: p.variants.reduce((sum, v) => sum + v.stockQuantity, 0),
       wishlistCount: p._count.wishlistItems,
+      reviewCount: p._count.reviews,
     }));
 
     res.json({
@@ -156,6 +161,7 @@ router.get('/featured', async (req, res, next) => {
       orderBy: { createdAt: 'desc' },
       include: {
         category: { select: { id: true, name: true, slug: true } },
+        seller: { select: { id: true, storeName: true } },
         images: { where: { isPrimary: true }, take: 1 },
         variants: {
           where: { isActive: true },
@@ -169,6 +175,7 @@ router.get('/featured', async (req, res, next) => {
       name: p.name,
       slug: p.slug,
       category: p.category,
+      seller: p.seller,
       basePriceCentavos: p.basePriceCentavos,
       compareAtPriceCentavos: p.compareAtPriceCentavos,
       primaryImage: p.images[0]?.url || null,
@@ -183,10 +190,10 @@ router.get('/featured', async (req, res, next) => {
   }
 });
 
-// GET /api/products/filters — Available filter options
+// GET /api/products/filters — Available filter options (including Sellers per FR-2.6)
 router.get('/filters', async (req, res, next) => {
   try {
-    const [categories, brands, colors, sizes, priceRange] = await Promise.all([
+    const [categories, brands, sellers, colors, sizes, priceRange] = await Promise.all([
       prisma.category.findMany({
         where: { isActive: true },
         select: { id: true, name: true, slug: true },
@@ -196,6 +203,11 @@ router.get('/filters', async (req, res, next) => {
         where: { isActive: true },
         select: { id: true, name: true, slug: true, logoUrl: true },
         orderBy: { name: 'asc' },
+      }),
+      prisma.user.findMany({
+        where: { role: 'SELLER', sellerStatus: 'APPROVED', isActive: true },
+        select: { id: true, storeName: true, storeLogoUrl: true },
+        orderBy: { storeName: 'asc' },
       }),
       prisma.productVariant.findMany({
         where: { isActive: true, product: { isActive: true } },
@@ -220,10 +232,11 @@ router.get('/filters', async (req, res, next) => {
       data: {
         categories,
         brands,
+        sellers,
         colors: colors.map(c => ({ name: c.color, hex: c.colorHex })),
         sizes: sizes.map(s => s.size),
         audiences: ['MEN', 'WOMEN', 'UNISEX'],
-        shoeTypes: ['RUNNING', 'LIFESTYLE', 'BASKETBALL', 'TRAINING'],
+        shoeTypes: ['RUNNING', 'LIFESTYLE', 'BASKETBALL', 'TRAINING', 'CASUAL', 'BOOTS'],
         priceRange: {
           min: priceRange._min.basePriceCentavos ? priceRange._min.basePriceCentavos / 100 : 0,
           max: priceRange._max.basePriceCentavos ? priceRange._max.basePriceCentavos / 100 : 10000,
@@ -235,7 +248,7 @@ router.get('/filters', async (req, res, next) => {
   }
 });
 
-// GET /api/products/:slug — Product detail page
+// GET /api/products/:slug — Product detail page with Seller info & Reviews
 router.get('/:slug', optionalAuth, async (req, res, next) => {
   try {
     const product = await prisma.product.findUnique({
@@ -243,11 +256,17 @@ router.get('/:slug', optionalAuth, async (req, res, next) => {
       include: {
         category: { select: { id: true, name: true, slug: true } },
         brand: { select: { id: true, name: true, slug: true, description: true, logoUrl: true } },
-        seller: { select: { id: true, storeName: true, storeDescription: true } },
+        seller: { select: { id: true, storeName: true, storeDescription: true, storeLogoUrl: true, sellerStatus: true } },
         images: { orderBy: { sortOrder: 'asc' } },
         variants: {
           where: { isActive: true },
           orderBy: [{ color: 'asc' }, { size: 'asc' }],
+        },
+        reviews: {
+          orderBy: { createdAt: 'desc' },
+          include: {
+            user: { select: { id: true, firstName: true, lastName: true } },
+          },
         },
       },
     });
@@ -256,7 +275,6 @@ router.get('/:slug', optionalAuth, async (req, res, next) => {
       return res.status(404).json({ success: false, error: { message: 'Product not found' } });
     }
 
-    // Check if wishlisted by current user
     let isWishlisted = false;
     if (req.user) {
       const wishlistItem = await prisma.wishlistItem.findUnique({
@@ -265,7 +283,6 @@ router.get('/:slug', optionalAuth, async (req, res, next) => {
       isWishlisted = !!wishlistItem;
     }
 
-    // Get related products (same category, excluding current)
     const related = await prisma.product.findMany({
       where: {
         categoryId: product.categoryId,
@@ -276,11 +293,11 @@ router.get('/:slug', optionalAuth, async (req, res, next) => {
       include: {
         images: { where: { isPrimary: true }, take: 1 },
         category: { select: { name: true, slug: true } },
+        seller: { select: { id: true, storeName: true } },
         variants: { where: { isActive: true }, select: { stockQuantity: true } },
       },
     });
 
-    // Group variants by color for display
     const colorGroups = {};
     for (const variant of product.variants) {
       if (!colorGroups[variant.color]) {
@@ -299,10 +316,15 @@ router.get('/:slug', optionalAuth, async (req, res, next) => {
       });
     }
 
+    const avgRating = product.reviews.length > 0
+      ? Number((product.reviews.reduce((s, r) => s + r.rating, 0) / product.reviews.length).toFixed(1))
+      : 5.0;
+
     res.json({
       success: true,
       data: {
         ...product,
+        averageRating: avgRating,
         isWishlisted,
         colorGroups: Object.values(colorGroups),
         relatedProducts: related.map(r => ({
@@ -310,6 +332,7 @@ router.get('/:slug', optionalAuth, async (req, res, next) => {
           name: r.name,
           slug: r.slug,
           category: r.category,
+          seller: r.seller,
           basePriceCentavos: r.basePriceCentavos,
           compareAtPriceCentavos: r.compareAtPriceCentavos,
           primaryImage: r.images[0]?.url || null,
@@ -317,6 +340,39 @@ router.get('/:slug', optionalAuth, async (req, res, next) => {
         })),
       },
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/products/:slug/reviews — Submit product & seller rating/review (Section B.1 & Process Flow 1)
+router.post('/:slug/reviews', authenticate, async (req, res, next) => {
+  try {
+    const product = await prisma.product.findUnique({ where: { slug: req.params.slug } });
+    if (!product || !product.isActive) {
+      return res.status(404).json({ success: false, error: { message: 'Product not found' } });
+    }
+
+    const { rating = 5, sellerRating = 5, comment, orderNumber } = req.body;
+    if (!comment || !comment.trim()) {
+      return res.status(400).json({ success: false, error: { message: 'Review comment is required' } });
+    }
+
+    const review = await prisma.productReview.create({
+      data: {
+        productId: product.id,
+        userId: req.user.id,
+        orderNumber: orderNumber || null,
+        rating: Math.min(5, Math.max(1, parseInt(rating) || 5)),
+        sellerRating: Math.min(5, Math.max(1, parseInt(sellerRating) || 5)),
+        comment: comment.trim(),
+      },
+      include: {
+        user: { select: { id: true, firstName: true, lastName: true } },
+      },
+    });
+
+    res.status(201).json({ success: true, data: review });
   } catch (error) {
     next(error);
   }

@@ -1,11 +1,10 @@
-// Order Routes — Checkout, order creation, order history
+// Order Routes — Multi-Seller Checkout, Order Creation, Order History, Receipt Confirmation & Cancellation (FR-3.1 to FR-3.12)
 const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
 const { authenticate, optionalAuth } = require('../middleware/auth.middleware');
 const { createError } = require('../middleware/error.middleware');
-const { body, param, query, validationResult } = require('express-validator');
-const { v4: uuidv4 } = require('uuid');
+const { body, validationResult } = require('express-validator');
 
 /**
  * Generate human-readable order number: STR-YYYYMMDD-XXXXX
@@ -28,6 +27,7 @@ router.post('/', [
   body('shippingPostalCode').trim().notEmpty().withMessage('Postal code required'),
   body('guestEmail').optional().isEmail().withMessage('Valid email required'),
   body('promotionCode').optional().trim(),
+  body('paymentMethod').optional().trim(),
   body('notes').optional().trim()
 ], async (req, res, next) => {
   try {
@@ -42,15 +42,13 @@ router.post('/', [
       shippingFullName, shippingPhone, shippingAddressLine1,
       shippingAddressLine2, shippingCity, shippingProvince,
       shippingPostalCode, shippingCountry, guestEmail,
-      promotionCode, notes, addressId
+      promotionCode, notes, paymentMethod = 'gcash'
     } = req.body;
 
-    // Guest must provide email
     if (!userId && !guestEmail) {
       return res.status(400).json({ success: false, message: 'Email is required for guest checkout' });
     }
 
-    // Find cart
     let cart;
     if (userId) {
       cart = await prisma.cart.findFirst({
@@ -68,13 +66,11 @@ router.post('/', [
       return res.status(400).json({ success: false, message: 'Cart is empty' });
     }
 
-    // Validate stock and compute server-side totals inside a transaction
     const result = await prisma.$transaction(async (tx) => {
       let subtotalCentavos = 0;
       const orderItems = [];
 
       for (const item of cart.items) {
-        // Lock the variant row and check stock
         const variant = await tx.productVariant.findUnique({
           where: { id: item.productVariantId },
           include: { product: true }
@@ -107,7 +103,7 @@ router.post('/', [
           _sellerId: variant.product.sellerId || null
         });
 
-        // Decrement stock
+        // Atomic stock decrement (FR-6.4)
         const updated = await tx.productVariant.updateMany({
           where: { id: variant.id, stockQuantity: { gte: item.quantity } },
           data: { stockQuantity: { decrement: item.quantity } }
@@ -117,19 +113,18 @@ router.post('/', [
           throw createError(`Race condition: stock depleted for ${variant.product.name}`, 409);
         }
 
-        // Record stock movement
         const afterVariant = await tx.productVariant.findUnique({ where: { id: variant.id } });
         await tx.stockMovement.create({
           data: {
             productVariantId: variant.id,
             quantityChange: -item.quantity,
             stockAfter: afterVariant.stockQuantity,
+            movementType: 'OUTGOING',
             reason: 'ORDER_PLACED'
           }
         });
       }
 
-      // Apply promotion if provided
       let discountTotalCentavos = 0;
       let promotionId = null;
 
@@ -167,11 +162,13 @@ router.post('/', [
         promotionId = promo.id;
       }
 
-      // Configurable shipping fee (default ₱150.00)
-      const shippingFeeCentavos = parseInt(process.env.SHIPPING_FEE_CENTAVOS || '15000');
+      // Check PlatformConfig for shipping fee & free shipping threshold
+      const config = await tx.platformConfig.findUnique({ where: { id: 'default' } });
+      const baseShipping = config ? config.shippingFeeCentavos : parseInt(process.env.SHIPPING_FEE_CENTAVOS || '15000');
+      const freeThreshold = config ? config.freeShippingThresholdCentavos : 300000;
+      const shippingFeeCentavos = subtotalCentavos >= freeThreshold ? 0 : baseShipping;
       const grandTotalCentavos = subtotalCentavos - discountTotalCentavos + shippingFeeCentavos;
 
-      // Create order
       const order = await tx.order.create({
         data: {
           orderNumber: generateOrderNumber(),
@@ -179,6 +176,9 @@ router.post('/', [
           guestEmail: guestEmail || null,
           orderStatus: 'PENDING',
           paymentStatus: 'UNPAID',
+          paymentMethod: ['gcash', 'maya', 'paypal'].includes(String(paymentMethod).toLowerCase())
+            ? String(paymentMethod).toLowerCase()
+            : 'gcash',
           shippingStatus: 'UNFULFILLED',
           subtotalCentavos,
           discountTotalCentavos,
@@ -201,7 +201,7 @@ router.post('/', [
         include: { items: true }
       });
 
-      // Split order into seller slices (SellerOrder per distinct merchant)
+      // Split order into seller slices (SellerOrder per distinct merchant, FR-5.9)
       const sellerMap = new Map();
       for (const item of orderItems) {
         if (item._sellerId) {
@@ -232,7 +232,6 @@ router.post('/', [
         });
       }
 
-      // Clear the cart
       await tx.cartItem.deleteMany({ where: { cartId: cart.id } });
 
       return order;
@@ -253,7 +252,7 @@ router.post('/', [
   }
 });
 
-// GET /api/orders — List user's orders
+// GET /api/orders — List user's orders (FR-3.10)
 router.get('/', authenticate, async (req, res, next) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -264,7 +263,13 @@ router.get('/', authenticate, async (req, res, next) => {
         where: { userId: req.user.id },
         include: {
           items: true,
-          payments: { select: { id: true, status: true, provider: true, isDemo: true, verifiedAt: true } }
+          payments: { select: { id: true, status: true, provider: true, paymentMethod: true, isDemo: true, verifiedAt: true } },
+          shipments: true,
+          sellerOrders: {
+            include: {
+              seller: { select: { id: true, storeName: true } }
+            }
+          }
         },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
@@ -286,7 +291,7 @@ router.get('/', authenticate, async (req, res, next) => {
   }
 });
 
-// GET /api/orders/:orderNumber — Get order details
+// GET /api/orders/:orderNumber — Get order details with Seller slices, Shipments & Support Tickets (FR-3.11)
 router.get('/:orderNumber', optionalAuth, async (req, res, next) => {
   try {
     const { orderNumber } = req.params;
@@ -297,11 +302,28 @@ router.get('/:orderNumber', optionalAuth, async (req, res, next) => {
         items: true,
         payments: {
           select: {
-            id: true, provider: true, status: true, amountCentavos: true,
-            currency: true, isDemo: true, verifiedAt: true, createdAt: true
+            id: true, provider: true, paymentMethod: true, providerPaymentId: true, status: true, amountCentavos: true,
+            currency: true, isDemo: true, verifiedAt: true, financeVerified: true, createdAt: true
           }
         },
-        shipments: true
+        shipments: {
+          include: {
+            deliveryPersonnel: { select: { id: true, firstName: true, lastName: true, phone: true } },
+            sellerOrder: { include: { seller: { select: { id: true, storeName: true } } } }
+          }
+        },
+        sellerOrders: {
+          include: {
+            seller: { select: { id: true, storeName: true, email: true } },
+            items: true
+          }
+        },
+        supportTickets: {
+          include: {
+            messages: { orderBy: { createdAt: 'asc' } }
+          },
+          orderBy: { createdAt: 'desc' }
+        }
       }
     });
 
@@ -309,11 +331,12 @@ router.get('/:orderNumber', optionalAuth, async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    // Verify access: owner, admin, or guest with matching email
     const userId = req.user?.id;
-    const isAdmin = req.user?.role === 'ADMIN';
-    if (!isAdmin && order.userId !== userId) {
-      // Could be guest — they need to provide email via query param
+    const role = req.user?.role;
+    const isStaff = ['ADMIN', 'CUSTOMER_SUPPORT', 'DELIVERY_PERSONNEL', 'FINANCE_OFFICER', 'INVENTORY_MANAGER'].includes(role);
+    const isSellerInOrder = role === 'SELLER' && order.sellerOrders.some(so => so.sellerId === userId);
+
+    if (!isStaff && !isSellerInOrder && order.userId !== userId) {
       const emailCheck = req.query.email;
       if (!order.guestEmail || order.guestEmail !== emailCheck) {
         return res.status(403).json({ success: false, message: 'Access denied' });
@@ -335,7 +358,76 @@ router.get('/:orderNumber', optionalAuth, async (req, res, next) => {
   }
 });
 
-// PATCH /api/orders/:orderNumber/cancel — Cancel a pending order
+// PATCH /api/orders/:orderNumber/confirm-receipt — Shopper confirms package receipt (FR-7.7 & Process Flow 1)
+router.patch('/:orderNumber/confirm-receipt', authenticate, async (req, res, next) => {
+  try {
+    const { orderNumber } = req.params;
+    const order = await prisma.order.findUnique({
+      where: { orderNumber },
+      include: { shipments: true }
+    });
+
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+
+    if (order.userId !== req.user.id && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    const now = new Date();
+    const updatedOrder = await prisma.$transaction(async (tx) => {
+      const o = await tx.order.update({
+        where: { id: order.id },
+        data: {
+          receivedConfirmedAt: now,
+          orderStatus: 'DELIVERED',
+          shippingStatus: 'DELIVERED'
+        }
+      });
+
+      await tx.sellerOrder.updateMany({
+        where: { orderId: order.id, status: { not: 'CANCELLED' } },
+        data: { status: 'DELIVERED', deliveredAt: now }
+      });
+
+      for (const s of order.shipments) {
+        const prevEvents = Array.isArray(s.history?.events) ? s.history.events : [];
+        await tx.shipment.update({
+          where: { id: s.id },
+          data: {
+            status: 'DELIVERED',
+            deliveredAt: s.deliveredAt || now,
+            recipientName: s.recipientName || `${req.user.firstName} ${req.user.lastName}`,
+            history: {
+              events: [
+                ...prevEvents,
+                {
+                  status: 'DELIVERED',
+                  note: 'Customer confirmed package receipt',
+                  actor: req.user.email,
+                  timestamp: now.toISOString()
+                }
+              ]
+            }
+          }
+        });
+      }
+
+      return o;
+    });
+
+    res.json({
+      success: true,
+      message: 'Order receipt confirmed. Thank you for shopping with STRIDERA!',
+      data: updatedOrder
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/orders/:orderNumber/cancel — Cancel a pending or unshipped order (FR-3.12)
 router.patch('/:orderNumber/cancel', authenticate, async (req, res, next) => {
   try {
     const { orderNumber } = req.params;
@@ -349,15 +441,14 @@ router.patch('/:orderNumber/cancel', authenticate, async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    if (order.userId !== req.user.id && req.user.role !== 'ADMIN') {
+    if (order.userId !== req.user.id && !['ADMIN', 'CUSTOMER_SUPPORT'].includes(req.user.role)) {
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
-    if (order.orderStatus !== 'PENDING') {
+    if (!['PENDING', 'CONFIRMED'].includes(order.orderStatus)) {
       return res.status(400).json({ success: false, message: `Cannot cancel order in ${order.orderStatus} status` });
     }
 
-    // Restore stock in a transaction
     await prisma.$transaction(async (tx) => {
       for (const item of order.items) {
         await tx.productVariant.update({
@@ -371,6 +462,7 @@ router.patch('/:orderNumber/cancel', authenticate, async (req, res, next) => {
             productVariantId: item.productVariantId,
             quantityChange: item.quantity,
             stockAfter: variant.stockQuantity,
+            movementType: 'INCOMING',
             reason: 'ORDER_CANCELLED'
           }
         });
@@ -378,7 +470,10 @@ router.patch('/:orderNumber/cancel', authenticate, async (req, res, next) => {
 
       await tx.order.update({
         where: { id: order.id },
-        data: { orderStatus: 'CANCELLED' }
+        data: {
+          orderStatus: 'CANCELLED',
+          paymentStatus: order.paymentStatus === 'PAID' ? 'REFUNDED' : order.paymentStatus
+        }
       });
 
       await tx.sellerOrder.updateMany({

@@ -1,11 +1,27 @@
-// Authentication middleware — JWT verification and role checks
+// Authentication middleware — JWT verification and role checks across all 7 roles (FR-1.3, FR-1.4, FR-1.9)
 const jwt = require('jsonwebtoken');
 const prisma = require('../lib/prisma');
 const { createError } = require('./error.middleware');
 
+const USER_SELECT = {
+  id: true,
+  email: true,
+  role: true,
+  isActive: true,
+  accountStatus: true,
+  firstName: true,
+  lastName: true,
+  phone: true,
+  sellerStatus: true,
+  storeName: true,
+  storeDescription: true,
+  storeLogoUrl: true,
+  identificationDetails: true
+};
+
 /**
  * Verify JWT token from cookie or Authorization header
- * Sets req.user with { id, email, role }
+ * Sets req.user with full role and accountStatus context
  */
 async function authenticate(req, res, next) {
   try {
@@ -24,11 +40,11 @@ async function authenticate(req, res, next) {
 
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
-      select: { id: true, email: true, role: true, isActive: true, firstName: true, lastName: true, sellerStatus: true, storeName: true },
+      select: USER_SELECT,
     });
 
-    if (!user || !user.isActive) {
-      throw createError('User not found or deactivated', 401);
+    if (!user || !user.isActive || (user.accountStatus && user.accountStatus !== 'ACTIVE')) {
+      throw createError('User account not found, deactivated, or suspended', 401);
     }
 
     req.user = user;
@@ -55,9 +71,9 @@ async function optionalAuth(req, res, next) {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       const user = await prisma.user.findUnique({
         where: { id: decoded.userId },
-        select: { id: true, email: true, role: true, isActive: true, firstName: true, lastName: true, sellerStatus: true, storeName: true },
+        select: USER_SELECT,
       });
-      if (user && user.isActive) {
+      if (user && user.isActive && (!user.accountStatus || user.accountStatus === 'ACTIVE')) {
         req.user = user;
       }
     }
@@ -68,7 +84,7 @@ async function optionalAuth(req, res, next) {
 }
 
 /**
- * Require admin role
+ * Require Administrator role (FR-10.1)
  */
 function requireAdmin(req, res, next) {
   if (!req.user || req.user.role !== 'ADMIN') {
@@ -78,8 +94,8 @@ function requireAdmin(req, res, next) {
 }
 
 /**
- * Require seller role with APPROVED status
- * Returns 404 (not 403) for non-sellers per skill §4 (seller isolation)
+ * Require Seller role with APPROVED status (FR-5.1)
+ * Returns 404 (not 403) for non-sellers per seller isolation rules
  */
 function requireSeller(req, res, next) {
   if (!req.user || req.user.role !== 'SELLER') {
@@ -92,7 +108,7 @@ function requireSeller(req, res, next) {
 }
 
 /**
- * Require admin OR approved seller role
+ * Require Admin OR Approved Seller role
  */
 function requireAdminOrSeller(req, res, next) {
   if (!req.user) {
@@ -101,6 +117,46 @@ function requireAdminOrSeller(req, res, next) {
   if (req.user.role === 'ADMIN') return next();
   if (req.user.role === 'SELLER' && req.user.sellerStatus === 'APPROVED') return next();
   return next(createError('Not found', 404));
+}
+
+/**
+ * Require Inventory Manager or Admin role (FR-6.1)
+ */
+function requireInventoryManager(req, res, next) {
+  if (!req.user || !['INVENTORY_MANAGER', 'ADMIN'].includes(req.user.role)) {
+    return next(createError('Inventory Manager access required', 403));
+  }
+  next();
+}
+
+/**
+ * Require Delivery Personnel or Admin role (FR-7.1)
+ */
+function requireDelivery(req, res, next) {
+  if (!req.user || !['DELIVERY_PERSONNEL', 'ADMIN'].includes(req.user.role)) {
+    return next(createError('Delivery Personnel access required', 403));
+  }
+  next();
+}
+
+/**
+ * Require Customer Support Personnel or Admin role (FR-8.1)
+ */
+function requireSupport(req, res, next) {
+  if (!req.user || !['CUSTOMER_SUPPORT', 'ADMIN'].includes(req.user.role)) {
+    return next(createError('Customer Support access required', 403));
+  }
+  next();
+}
+
+/**
+ * Require Finance Officer or Admin role (FR-9.1)
+ */
+function requireFinance(req, res, next) {
+  if (!req.user || !['FINANCE_OFFICER', 'ADMIN'].includes(req.user.role)) {
+    return next(createError('Finance Officer access required', 403));
+  }
+  next();
 }
 
 /**
@@ -132,6 +188,10 @@ module.exports = {
   requireSeller,
   isSeller: requireSeller,
   requireAdminOrSeller,
+  requireInventoryManager,
+  requireDelivery,
+  requireSupport,
+  requireFinance,
   generateToken,
   setTokenCookie
 };

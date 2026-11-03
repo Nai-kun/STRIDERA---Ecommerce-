@@ -1,140 +1,48 @@
-# Demo Runbook — STRIDERA Multi-Seller E-Commerce
+# STRIDERA — Live Presentation & 7-Role Demo Runbook
 
-> **Audience**: Presenter / IPT evaluator  
-> **Duration**: ~10 minutes for full walkthrough  
-> **Prerequisites**: App running locally (`backend` on port 4000, `frontend` on port 3000), database seeded
+## 1. Starting the Platform
+Run three terminals (or use the running background services):
+```powershell
+# Terminal 1: Start Embedded PostgreSQL Server (with optional --reset-new --seed)
+cd backend
+node db-server.js
 
----
+# Terminal 2: Start Express API Server (Port 4000)
+cd backend
+npm run dev
 
-## Pre-Demo Checklist
-
-- [ ] `backend/.env` has `DEMO_MODE=true`
-- [ ] Backend running: `cd backend && node server.js`
-- [ ] Frontend running: `cd frontend && npm run dev`
-- [ ] Database seeded: `node database/seeds/seed.js`
-- [ ] Open browser to **http://localhost:3000**
-
----
-
-## Demo Flow 1: Shopper Checkout (Full E-Wallet Path)
-
-### Step 1 — Browse the Catalog
-1. Open http://localhost:3000
-2. Click **Shop** in the navbar
-3. Apply a filter: select **Brand → STRIDERA Lab** in the sidebar
-4. Observe: products filtered to the STRIDERA Lab brand, brand badge visible on product cards
-
-### Step 2 — Product Detail & Variant Selection
-1. Click any product card
-2. Select a **size** (e.g., US 9) and a **color** (e.g., Midnight Black)
-3. Observe: stock indicator shows "In Stock" / "Low Stock" / "Out of Stock" per variant
-4. Set quantity to **1**
-5. Click **Add to Cart**
-
-### Step 3 — Cart Review
-1. Click **Cart** in the navbar (or the cart badge)
-2. Observe: item appears with unit price in ₱, subtotal, shipping fee, grand total
-3. Enter promo code **STRIDE10** → click Apply
-4. Observe: 10% discount applied (max ₱500), totals update
-5. Click **Proceed to Checkout**
-
-### Step 4 — Checkout & Payment
-1. Fill in shipping details (use any name/address, e.g., *Manila, Metro Manila 1000*)
-2. Click **Place Order**
-3. The app attempts to create a PayMongo checkout session:
-   - **With PayMongo keys**: you are redirected to the PayMongo sandbox page — complete with a test GCash/Maya payment
-   - **Without keys (Demo Mode)**: a yellow banner appears with **⚡ Demo: Simulate Payment Success** button
-
-### Step 5 — Simulate Payment (Demo Mode)
-1. Click **⚡ Demo: Simulate Payment Success**
-2. Observe: order status immediately updates to **PAID**
-3. Order confirmation shows order number, items, and payment status
+# Terminal 3: Start Next.js Frontend (Port 3000)
+cd frontend
+npm run dev
+```
 
 ---
 
-## Demo Flow 2: Seller Fulfillment
-
-### Step 6 — Seller Login
-1. Click **Login** → log in as `seller@stridera.ph` / `Seller@123!`
-2. Click **Merchant Hub** in the navbar (or navigate to `/seller/dashboard`)
-3. Observe: dashboard shows KPIs — products listed, orders pending/paid, revenue total
-
-### Step 7 — View & Fulfill an Order Slice
-1. Click **Orders** in the Merchant Hub sidebar
-2. Find the order placed in Step 3–5 — status shows **PAID**
-3. Click **Fulfill** → enter a tracking number (e.g., `LBC-12345678`)
-4. Click **Mark as Shipped**
-5. Observe: slice status changes to **SHIPPED**
-
-### Step 8 — Stock Adjustment (Audit Trail)
-1. Click **Products** → select any product
-2. Find a variant row → click **Adjust Stock**
-3. Enter a new quantity and a reason (e.g., `Manual recount after warehouse audit`)
-4. Submit — observe: stock updated, audit movement recorded
+## 2. 1-Click 7-Role Demo Credentials (Password: `Password123!`)
+Open `http://localhost:3000/account/login` and click any of the **7 Role Switcher buttons**:
+1. **Role 1 — Shopper (`CUSTOMER`)**: `customer@stridera.ph` → `/shop`, `/checkout`, `/account/profile`
+2. **Role 2 — Seller (`SELLER`)**: `seller@stridera.ph` → `/seller/dashboard`, `/seller/products`, `/seller/orders`
+3. **Role 3 — Administrator (`ADMIN`)**: `admin@stridera.ph` → `/admin/dashboard`
+4. **Role 4 — Inventory Manager (`INVENTORY_MANAGER`)**: `inventory@stridera.ph` → `/inventory`
+5. **Role 5 — Delivery Personnel (`DELIVERY_PERSONNEL`)**: `delivery@stridera.ph` → `/delivery`
+6. **Role 6 — Customer Support (`CUSTOMER_SUPPORT`)**: `support@stridera.ph` → `/support`
+7. **Role 7 — Finance Officer (`FINANCE_OFFICER`)**: `finance@stridera.ph` → `/finance`
 
 ---
 
-## Demo Flow 3: Admin Control Center
-
-### Step 9 — Admin Login
-1. Log out → log in as `admin@stridera.ph` / `Admin@Stridera2024!`
-2. Click **Admin** in the navbar → **Admin Dashboard**
-
-### Step 10 — Approve a Pending Seller
-1. Scroll to **Seller Applications** panel
-2. Find `pending.seller@stridera.ph` — status: **PENDING**
-3. Click **Approve** → confirm
-4. Observe: status changes to **APPROVED**; seller can now log in and access the portal
-
-### Step 11 — Masked Config Audit
-1. Scroll to **Platform Config Status** panel
-2. Observe: PayMongo key shown as `sk_test_...abcd` (never the full key)
-3. DEMO_MODE shows `true`
-4. Database: shows host/database name only, password masked
-
-### Step 12 — Payment Logs
-1. Scroll to **Payment Logs** panel
-2. Observe: the simulated payment from Step 5 appears with `is_demo: true` flag
-3. Demo payments are visually distinguished from real webhook-verified payments
-
----
-
-## Demo Flow 4: Brand Directory
-
-### Step 13 — Brand Pages
-1. Navigate to **http://localhost:3000/brands**
-2. Observe: brand cards for **STRIDERA Lab** and **Apex Athletics**
-3. Click **STRIDERA Lab** → brand storefront page shows brand description and all products
-
----
-
-## Seed Credentials Reference
-
-| Role | Email | Password |
-|------|-------|----------|
-| Admin | `admin@stridera.ph` | `Admin@Stridera2024!` |
-| Approved Seller | `seller@stridera.ph` | `Seller@123!` |
-| Pending Seller | `pending.seller@stridera.ph` | `Seller@123!` |
-| Customer | `demo@stridera.ph` | `Customer@123!` |
-
----
-
-## Promo Codes
-
-| Code | Discount |
-|------|---------|
-| `STRIDE10` | 10% off (max ₱500 discount) |
-| `LAUNCH500` | ₱500 flat off orders ≥ ₱3,000 |
-
----
-
-## Troubleshooting
-
-| Symptom | Fix |
-|---------|-----|
-| "Cart is empty" on checkout | Add items via Shop → Product Detail first |
-| Payment session fails | Ensure `DEMO_MODE=true` in `backend/.env` and use the ⚡ simulate button |
-| Seller portal shows 403 | Seller account may be PENDING — log in as admin and approve first |
-| Backend 500 error on startup | Run `npx prisma generate` inside `backend/` directory |
-| "Relation does not exist" DB error | Run `npx prisma db push` from `backend/` then re-seed |
-
+## 3. End-to-End 7-Role Walkthrough Script
+1. **Shopper (`customer@stridera.ph`)**:
+   - Browse `/shop`, filter by Seller (`Stride & Co. Official` vs `SoleCraft Manila`), select a footwear model, choose Color & Size, and add to cart.
+   - Proceed to `/checkout`, select **GCash**, **Maya**, or **PayPal**, click **Place Order & Generate E-Wallet QR**, and click **✓ Authorize & Complete Payment** on the Sandbox QR modal.
+2. **Inventory Manager (`inventory@stridera.ph`)**:
+   - Open `/inventory` to inspect real-time SKU deductions, low-stock alerts, log a `+ Restock` incoming batch, and view the **Valuation & Seller Summary Report**.
+3. **Seller (`seller@stridera.ph`)**:
+   - Open `/seller/orders`, click **✓ Accept & Prepare Order**, then click **Mark Shipped & Add Tracking** to generate a courier waybill for Delivery Personnel.
+4. **Delivery Personnel (`delivery@stridera.ph`)**:
+   - Open `/delivery`, inspect the customer's recipient address and phone number, click **📦 Confirm Seller Collection & Start Transit**, then click **✓ Confirm Delivered & Record POD**.
+5. **Customer Support (`support@stridera.ph`)**:
+   - Open `/support`, inspect the customer ticket thread and linked order/payment/shipment diagnostics, reply to the customer, or click **💸 Approve & Escalate Refund to Finance**.
+6. **Finance Officer (`finance@stridera.ph`)**:
+   - Open `/finance`, click **✓ Verify Reference** on e-wallet payments, review the `5%` platform commission breakdown, click **Disburse Payout** to settle seller earnings, or process approved refunds.
+7. **Administrator (`admin@stridera.ph`)**:
+   - Open `/admin/dashboard` to review 30-day revenue KPIs, manage all 7 roles under **Users & 7 Roles**, approve pending sellers under **Merchants & Approvals**, and adjust commission/wallet settings under **Platform Settings**.

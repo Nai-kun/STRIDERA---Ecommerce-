@@ -1,0 +1,46 @@
+flowchart LR
+    %% External Entities (7 Roles + E-Wallet Gateway)
+    Customer["👤 Shopper / Customer (Role 1)"]
+    Seller["🏪 Seller / Merchant (Role 2)"]
+    Admin["🛡️ Administrator (Role 3)"]
+    InvMgr["📦 Inventory Manager (Role 4)"]
+    Courier["🚚 Delivery Personnel (Role 5)"]
+    Support["🎧 Customer Support (Role 6)"]
+    Finance["💰 Finance Officer (Role 7)"]
+    Gateway["💳 E-Wallet Gateway\n(GCash / Maya / PayPal)"]
+
+    %% Central System
+    System(("0.0\nSTRIDERA\nMulti-Seller Footwear\nE-Commerce System"))
+
+    %% Customer Flows
+    Customer -- "Registration, Browse, Cart, Checkout, Reviews, Support Ticket" --> System
+    System -- "Catalog, Order Receipt, Tracking Status, Ticket Updates" --> Customer
+
+    %% Seller Flows
+    Seller -- "Store Registration, Product/Variant CRUD, Order Acceptance & Dispatch" --> System
+    System -- "Store Approval, Order Slices, Sales & Payout Ledger" --> Seller
+
+    %% Admin Flows
+    Admin -- "7-Role Governance, Seller Approval, Brand Assignment, Platform Config" --> System
+    System -- "Executive KPIs, Audit Trail, System & Payment Logs" --> Admin
+
+    %% Inventory Manager Flows
+    InvMgr -- "Incoming Restock, Outgoing Dispatch, Stock Adjustments, Availability" --> System
+    System -- "SKU Stock Levels, Low-Stock Alerts, Movement History, Valuation Report" --> InvMgr
+
+    %% Delivery Personnel Flows
+    Courier -- "Assignment Acceptance, Seller Pickup, Transit Status, Proof of Delivery" --> System
+    System -- "Assigned Shipments, Customer Delivery Details, Waybills" --> Courier
+
+    %% Customer Support Flows
+    Support -- "Ticket Replies, Order/Refund Approvals, Escalations to Finance" --> System
+    System -- "Support Tickets, Order/Payment/Shipment Diagnostic Lookup" --> Support
+
+    %% Finance Officer Flows
+    Finance -- "Payment Reference Verification, Seller Payouts, Refund Disbursement" --> System
+    System -- "E-Wallet Transaction Ledger, Commission Breakdown, Financial Reports" --> Finance
+
+    %% Payment Gateway Flows
+    System -- "Checkout Session Request (Centavos, Idempotency Key)" --> Gateway
+    Gateway -- "Signed Webhook / Sandbox Authorization & Reference" --> System
+

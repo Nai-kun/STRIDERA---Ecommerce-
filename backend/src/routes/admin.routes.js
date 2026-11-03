@@ -607,9 +607,13 @@ router.get('/sellers', async (req, res, next) => {
           lastName: true,
           phone: true,
           role: true,
+          isActive: true,
+          accountStatus: true,
           sellerStatus: true,
           storeName: true,
           storeDescription: true,
+          storeLogoUrl: true,
+          identificationDetails: true,
           createdAt: true,
           brand: { select: { id: true, name: true, slug: true } },
           _count: { select: { products: true, sellerOrders: true } }
@@ -858,6 +862,223 @@ router.get('/payment-logs', async (req, res, next) => {
         amountFormatted: `₱${(p.amountCentavos / 100).toFixed(2)}`
       })),
       pagination: { page, limit, total, pages: Math.ceil(total / limit) }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ────────────────────────────────────────────────
+//  7-ROLE USER MANAGEMENT & PLATFORM CONFIGURATION (Feature 10: FR-10.2, FR-10.4, FR-10.9)
+// ────────────────────────────────────────────────
+
+// GET /api/admin/users — List all user accounts across all 7 roles (FR-10.2)
+router.get('/users', async (req, res, next) => {
+  try {
+    const { role, accountStatus, search } = req.query;
+    const where = {};
+    if (role) where.role = role;
+    if (accountStatus) where.accountStatus = accountStatus;
+    if (search) {
+      where.OR = [
+        { email: { contains: search, mode: 'insensitive' } },
+        { firstName: { contains: search, mode: 'insensitive' } },
+        { lastName: { contains: search, mode: 'insensitive' } },
+        { storeName: { contains: search, mode: 'insensitive' } }
+      ];
+    }
+
+    const users = await prisma.user.findMany({
+      where,
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        phone: true,
+        role: true,
+        isActive: true,
+        accountStatus: true,
+        sellerStatus: true,
+        storeName: true,
+        identificationDetails: true,
+        createdAt: true,
+        _count: { select: { orders: true, products: true } }
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+
+    res.json({ success: true, data: users });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/admin/users/:id/role — Assign user role across all 7 roles (FR-10.4)
+router.patch('/users/:id/role', [
+  body('role').isIn([
+    'CUSTOMER',
+    'SELLER',
+    'ADMIN',
+    'INVENTORY_MANAGER',
+    'DELIVERY_PERSONNEL',
+    'CUSTOMER_SUPPORT',
+    'FINANCE_OFFICER'
+  ]).withMessage('Valid role required')
+], async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
+
+    const { role } = req.body;
+    const user = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    const updateData = { role };
+    if (role === 'SELLER' && !user.sellerStatus) {
+      updateData.sellerStatus = 'APPROVED';
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: updateData,
+      select: { id: true, email: true, firstName: true, lastName: true, role: true, accountStatus: true, sellerStatus: true }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        userId: req.user.id,
+        action: 'ADMIN_ASSIGN_USER_ROLE',
+        entityType: 'User',
+        entityId: user.id,
+        oldValues: { role: user.role },
+        newValues: { role },
+        ipAddress: req.ip
+      }
+    });
+
+    res.json({
+      success: true,
+      message: `Updated ${updated.email} role to ${role}`,
+      data: updated
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/admin/users/:id/status — Activate, deactivate, or suspend user account (FR-1.9, FR-10.2)
+router.patch('/users/:id/status', [
+  body('accountStatus').isIn(['ACTIVE', 'DEACTIVATED', 'SUSPENDED']).withMessage('Valid accountStatus required')
+], async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
+
+    const { accountStatus } = req.body;
+    const user = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    const isActive = accountStatus === 'ACTIVE';
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: { accountStatus, isActive },
+      select: { id: true, email: true, firstName: true, lastName: true, role: true, accountStatus: true, isActive: true }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        userId: req.user.id,
+        action: 'ADMIN_UPDATE_USER_STATUS',
+        entityType: 'User',
+        entityId: user.id,
+        oldValues: { accountStatus: user.accountStatus, isActive: user.isActive },
+        newValues: { accountStatus, isActive },
+        ipAddress: req.ip
+      }
+    });
+
+    res.json({
+      success: true,
+      message: `User ${updated.email} account status set to ${accountStatus}`,
+      data: updated
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/admin/platform-config — Read platform configuration settings (FR-10.9)
+router.get('/platform-config', async (req, res, next) => {
+  try {
+    let config = await prisma.platformConfig.findUnique({ where: { id: 'default' } });
+    if (!config) {
+      config = await prisma.platformConfig.create({
+        data: {
+          id: 'default',
+          platformFeePercent: 5,
+          lowStockThreshold: 5,
+          shippingFeeCentavos: 15000,
+          freeShippingThresholdCentavos: 300000,
+          enabledWallets: 'gcash,maya,paypal',
+          sandboxMode: true
+        }
+      });
+    }
+    res.json({ success: true, data: config });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /api/admin/platform-config — Update platform configuration settings (FR-10.9)
+router.put('/platform-config', async (req, res, next) => {
+  try {
+    const {
+      platformFeePercent,
+      lowStockThreshold,
+      shippingFeeCentavos,
+      freeShippingThresholdCentavos,
+      enabledWallets,
+      sandboxMode
+    } = req.body;
+
+    const updated = await prisma.platformConfig.upsert({
+      where: { id: 'default' },
+      update: {
+        ...(platformFeePercent !== undefined && { platformFeePercent: Math.max(0, Math.min(50, parseInt(platformFeePercent))) }),
+        ...(lowStockThreshold !== undefined && { lowStockThreshold: Math.max(1, parseInt(lowStockThreshold)) }),
+        ...(shippingFeeCentavos !== undefined && { shippingFeeCentavos: Math.max(0, parseInt(shippingFeeCentavos)) }),
+        ...(freeShippingThresholdCentavos !== undefined && { freeShippingThresholdCentavos: Math.max(0, parseInt(freeShippingThresholdCentavos)) }),
+        ...(enabledWallets !== undefined && { enabledWallets: String(enabledWallets) }),
+        ...(sandboxMode !== undefined && { sandboxMode: Boolean(sandboxMode) })
+      },
+      create: {
+        id: 'default',
+        platformFeePercent: platformFeePercent !== undefined ? parseInt(platformFeePercent) : 5,
+        lowStockThreshold: lowStockThreshold !== undefined ? parseInt(lowStockThreshold) : 5,
+        shippingFeeCentavos: shippingFeeCentavos !== undefined ? parseInt(shippingFeeCentavos) : 15000,
+        freeShippingThresholdCentavos: freeShippingThresholdCentavos !== undefined ? parseInt(freeShippingThresholdCentavos) : 300000,
+        enabledWallets: enabledWallets || 'gcash,maya,paypal',
+        sandboxMode: sandboxMode !== undefined ? Boolean(sandboxMode) : true
+      }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        userId: req.user.id,
+        action: 'ADMIN_UPDATE_PLATFORM_CONFIG',
+        entityType: 'PlatformConfig',
+        entityId: 'default',
+        newValues: updated,
+        ipAddress: req.ip
+      }
+    });
+
+    res.json({
+      success: true,
+      message: 'Platform configuration settings updated',
+      data: updated
     });
   } catch (err) {
     next(err);

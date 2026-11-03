@@ -1,30 +1,35 @@
-%% Stridera DFD Level 0 - Context diagram (revised)
-%% Balanced against the multi-seller implementation
 flowchart LR
-  SH["Shopper"]
-  SE["Seller / Merchant"]
-  AD["Administrator / Presenter"]
-  PP["E-Wallet Provider (sandbox)"]
-  EM["Email Service (Could Have)"]
+    Customer["👤 Shopper / Customer (Role 1)"]
+    Seller["🏪 Seller / Merchant (Role 2)"]
+    Admin["🛡️ Administrator (Role 3)"]
+    InvMgr["📦 Inventory Manager (Role 4)"]
+    Courier["🚚 Delivery Personnel (Role 5)"]
+    Support["🎧 Customer Support (Role 6)"]
+    Finance["💰 Finance Officer (Role 7)"]
+    Gateway["💳 E-Wallet Gateway\n(GCash / Maya / PayPal)"]
 
-  P0(("0<br/>Stridera<br/>E-Commerce<br/>System"))
+    System(("0.0\nSTRIDERA\nMulti-Seller Footwear\nE-Commerce System"))
 
-  SH -->|"credentials, search and filters, variant choice, cart changes,<br/>checkout details, wallet choice, Pay Now, order status requests"| P0
-  P0 -->|"catalog and stock status, cart totals, payment link or test QR,<br/>Order Confirmed, order history, error messages"| SH
+    Customer -- "Registration, Browse, Cart, Checkout, Reviews, Support Ticket" --> System
+    System -- "Catalog, Order Receipt, Tracking Status, Ticket Updates" --> Customer
 
-  SE -->|"seller registration, listing and variant data, images,<br/>stock adjustments, fulfillment updates"| P0
-  P0 -->|"approval status, own products, own order slices, stock levels"| SE
+    Seller -- "Store Registration, Product/Variant CRUD, Order Acceptance & Dispatch" --> System
+    System -- "Store Approval, Order Slices, Sales & Payout Ledger" --> Seller
 
-  AD -->|"seller approvals, brand assignment, role changes, inventory overrides,<br/>simulate payment request"| P0
-  P0 -->|"all orders with payment status, webhook and system logs,<br/>masked config status, audit logs"| AD
+    Admin -- "7-Role Governance, Seller Approval, Brand Assignment, Platform Config" --> System
+    System -- "Executive KPIs, Audit Trail, System & Payment Logs" --> Admin
 
-  P0 -->|"payment request, payment status lookup"| PP
-  PP -->|"payment link or QR, signed payment webhook, payment status"| P0
+    InvMgr -- "Incoming Restock, Outgoing Dispatch, Stock Adjustments, Availability" --> System
+    System -- "SKU Stock Levels, Low-Stock Alerts, Movement History, Valuation Report" --> InvMgr
 
-  P0 -->|"receipt and shipment messages"| EM
-  EM -->|"delivery failure"| P0
+    Courier -- "Assignment Acceptance, Seller Pickup, Transit Status, Proof of Delivery" --> System
+    System -- "Assigned Shipments, Customer Delivery Details, Waybills" --> Courier
 
-  classDef ext fill:#ffffff,stroke:#111111,stroke-width:2px;
-  classDef proc fill:#eef7ff,stroke:#1d4ed8,stroke-width:2px;
-  class SH,SE,AD,PP,EM ext;
-  class P0 proc;
+    Support -- "Ticket Replies, Order/Refund Approvals, Escalations to Finance" --> System
+    System -- "Support Tickets, Order/Payment/Shipment Diagnostic Lookup" --> Support
+
+    Finance -- "Payment Reference Verification, Seller Payouts, Refund Disbursement" --> System
+    System -- "E-Wallet Transaction Ledger, Commission Breakdown, Financial Reports" --> Finance
+
+    System -- "Checkout Session Request (Centavos, Idempotency Key)" --> Gateway
+    Gateway -- "Signed Webhook / Sandbox Authorization & Reference" --> System

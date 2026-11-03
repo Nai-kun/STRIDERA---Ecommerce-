@@ -17,6 +17,10 @@ const orderRoutes = require('./src/routes/order.routes');
 const paymentRoutes = require('./src/routes/payment.routes');
 const adminRoutes = require('./src/routes/admin.routes');
 const sellerRoutes = require('./src/routes/seller.routes');
+const inventoryRoutes = require('./src/routes/inventory.routes');
+const deliveryRoutes = require('./src/routes/delivery.routes');
+const supportRoutes = require('./src/routes/support.routes');
+const financeRoutes = require('./src/routes/finance.routes');
 const wishlistRoutes = require('./src/routes/wishlist.routes');
 const { errorHandler, notFound } = require('./src/middleware/error.middleware');
 
@@ -65,6 +69,10 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/seller', sellerRoutes);
+app.use('/api/inventory', inventoryRoutes);
+app.use('/api/delivery', deliveryRoutes);
+app.use('/api/support', supportRoutes);
+app.use('/api/finance', financeRoutes);
 app.use('/api/wishlist', wishlistRoutes);
 
 // Health check

@@ -1,4 +1,4 @@
-// Payment Routes — PayMongo sandbox integration & demo fallback
+// Payment Routes — Multi-Wallet Processing (GCash, Maya, PayPal), Sandbox QR/Session, Webhook & Admin Demo Simulation (FR-4.1 to FR-4.12)
 const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
@@ -36,10 +36,10 @@ async function paymongoRequest(endpoint, method = 'GET', body = null) {
   return data;
 }
 
-// POST /api/payments/create-session — Create a PayMongo checkout session
+// POST /api/payments/create-session — Create an E-Wallet Checkout Session (GCash, Maya, PayPal) (FR-4.1 to FR-4.5)
 router.post('/create-session', authenticate, async (req, res, next) => {
   try {
-    const { orderNumber } = req.body;
+    const { orderNumber, paymentMethod: rawMethod } = req.body;
 
     if (!orderNumber) {
       return res.status(400).json({ success: false, message: 'Order number required' });
@@ -59,48 +59,80 @@ router.post('/create-session', authenticate, async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Order is already paid' });
     }
 
-    // Check for existing pending payment (idempotency)
+    const paymentMethod = ['gcash', 'maya', 'paypal'].includes(String(rawMethod || order.paymentMethod || 'gcash').toLowerCase())
+      ? String(rawMethod || order.paymentMethod || 'gcash').toLowerCase()
+      : 'gcash';
+
+    // Check for existing pending payment (idempotency per FR-4.10)
     const existingPayment = await prisma.payment.findFirst({
-      where: { orderId: order.id, status: 'PENDING' }
+      where: { orderId: order.id, status: 'PENDING', paymentMethod }
     });
 
-    if (existingPayment?.providerCheckoutUrl) {
+    const walletLabel = paymentMethod === 'gcash' ? 'GCash' : paymentMethod === 'maya' ? 'Maya' : 'PayPal';
+    const qrPayload = `STRIDERA-EWALLET|${walletLabel}|${order.orderNumber}|PHP|${(order.grandTotalCentavos / 100).toFixed(2)}`;
+
+    if (existingPayment) {
       return res.json({
         success: true,
         data: {
           paymentId: existingPayment.id,
-          checkoutUrl: existingPayment.providerCheckoutUrl,
+          paymentMethod,
+          walletLabel,
+          checkoutUrl: existingPayment.providerCheckoutUrl || null,
+          sandboxMode: !PAYMONGO_SECRET_KEY,
+          qrCodeData: qrPayload,
+          referenceNumber: existingPayment.providerPaymentId || `${walletLabel.toUpperCase()}-REF-${existingPayment.id.slice(0, 8).toUpperCase()}`,
+          amountCentavos: order.grandTotalCentavos,
+          amountFormatted: `₱${(order.grandTotalCentavos / 100).toFixed(2)}`,
           status: 'PENDING'
         }
       });
     }
 
     const idempotencyKey = uuidv4();
+    const referenceNumber = `${walletLabel.toUpperCase()}-REF-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
 
-    // If PayMongo key is not configured, return a message
+    // If PayMongo key is not configured, provide built-in Sandbox E-Wallet QR & Session (FR-4.2, FR-4.3, FR-4.5)
     if (!PAYMONGO_SECRET_KEY) {
-      // Create a payment record with no provider URL
       const payment = await prisma.payment.create({
         data: {
           orderId: order.id,
-          provider: 'paymongo',
+          provider: `${paymentMethod}_sandbox`,
+          paymentMethod,
+          providerPaymentId: referenceNumber,
           idempotencyKey,
           amountCentavos: order.grandTotalCentavos,
           currency: 'PHP',
           status: 'PENDING',
-          isDemo: false
+          isDemo: true
         }
       });
 
-      return res.status(503).json({
-        success: false,
-        message: 'Payment gateway not configured. Use demo mode or configure PAYMONGO_SECRET_KEY.',
-        paymentId: payment.id,
-        demoModeAvailable: DEMO_MODE
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { paymentStatus: 'PENDING', paymentMethod }
+      });
+
+      return res.json({
+        success: true,
+        message: `${walletLabel} Sandbox Session initialized. Scan QR or confirm payment below.`,
+        data: {
+          paymentId: payment.id,
+          paymentMethod,
+          walletLabel,
+          checkoutUrl: null,
+          sandboxMode: true,
+          qrCodeData: qrPayload,
+          referenceNumber,
+          amountCentavos: order.grandTotalCentavos,
+          amountFormatted: `₱${(order.grandTotalCentavos / 100).toFixed(2)}`,
+          status: 'PENDING',
+          demoModeAvailable: DEMO_MODE
+        }
       });
     }
 
-    // Create PayMongo checkout session
+    // Create live/sandbox PayMongo checkout session
     const sessionData = await paymongoRequest('/checkout_sessions', 'POST', {
       data: {
         attributes: {
@@ -115,8 +147,8 @@ router.post('/create-session', authenticate, async (req, res, next) => {
             quantity: 1
           }],
           payment_method_types: ['gcash', 'grab_pay', 'paymaya'],
-          success_url: `${process.env.FRONTEND_URL}/orders/${order.orderNumber}/confirmation`,
-          cancel_url: `${process.env.FRONTEND_URL}/orders/${order.orderNumber}`,
+          success_url: `${process.env.FRONTEND_URL}/account/orders/${order.orderNumber}`,
+          cancel_url: `${process.env.FRONTEND_URL}/account/orders/${order.orderNumber}`,
           metadata: {
             order_number: order.orderNumber,
             idempotency_key: idempotencyKey
@@ -128,11 +160,11 @@ router.post('/create-session', authenticate, async (req, res, next) => {
     const checkoutUrl = sessionData.data.attributes.checkout_url;
     const providerPaymentId = sessionData.data.id;
 
-    // Record payment
     const payment = await prisma.payment.create({
       data: {
         orderId: order.id,
         provider: 'paymongo',
+        paymentMethod,
         providerPaymentId,
         providerCheckoutUrl: checkoutUrl,
         idempotencyKey,
@@ -143,17 +175,23 @@ router.post('/create-session', authenticate, async (req, res, next) => {
       }
     });
 
-    // Update order payment status
     await prisma.order.update({
       where: { id: order.id },
-      data: { paymentStatus: 'PENDING' }
+      data: { paymentStatus: 'PENDING', paymentMethod }
     });
 
     res.json({
       success: true,
       data: {
         paymentId: payment.id,
+        paymentMethod,
+        walletLabel,
         checkoutUrl,
+        sandboxMode: false,
+        qrCodeData: qrPayload,
+        referenceNumber: providerPaymentId,
+        amountCentavos: order.grandTotalCentavos,
+        amountFormatted: `₱${(order.grandTotalCentavos / 100).toFixed(2)}`,
         status: 'PENDING'
       }
     });
@@ -162,19 +200,180 @@ router.post('/create-session', authenticate, async (req, res, next) => {
   }
 });
 
-// POST /api/payments/webhook — PayMongo webhook handler (raw body for signature verification)
+// POST /api/payments/confirm-sandbox — Confirm E-Wallet Sandbox Payment (FR-4.4, FR-4.6, FR-4.8, FR-4.10)
+router.post('/confirm-sandbox', authenticate, async (req, res, next) => {
+  try {
+    const { orderNumber, paymentId, paymentMethod: rawMethod } = req.body;
+
+    if (!orderNumber) {
+      return res.status(400).json({ success: false, message: 'Order number required' });
+    }
+
+    const order = await prisma.order.findUnique({ where: { orderNumber } });
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+
+    if (order.userId !== req.user.id && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    if (order.paymentStatus === 'PAID') {
+      return res.json({
+        success: true,
+        message: 'Payment already verified (idempotent)',
+        data: { orderNumber: order.orderNumber, paymentStatus: 'PAID', orderStatus: order.orderStatus }
+      });
+    }
+
+    const paymentMethod = ['gcash', 'maya', 'paypal'].includes(String(rawMethod || order.paymentMethod || 'gcash').toLowerCase())
+      ? String(rawMethod || order.paymentMethod || 'gcash').toLowerCase()
+      : 'gcash';
+
+    const refNumber = `${paymentMethod.toUpperCase()}-PAID-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+
+    await prisma.$transaction(async (tx) => {
+      let existing = paymentId
+        ? await tx.payment.findUnique({ where: { id: paymentId } })
+        : await tx.payment.findFirst({ where: { orderId: order.id, status: 'PENDING' } });
+
+      if (existing) {
+        await tx.payment.update({
+          where: { id: existing.id },
+          data: {
+            status: 'PAID',
+            paymentMethod,
+            providerPaymentId: existing.providerPaymentId || refNumber,
+            verifiedAt: new Date()
+          }
+        });
+      } else {
+        await tx.payment.create({
+          data: {
+            orderId: order.id,
+            provider: `${paymentMethod}_sandbox`,
+            paymentMethod,
+            providerPaymentId: refNumber,
+            idempotencyKey: uuidv4(),
+            amountCentavos: order.grandTotalCentavos,
+            currency: 'PHP',
+            status: 'PAID',
+            isDemo: true,
+            verifiedAt: new Date()
+          }
+        });
+      }
+
+      await tx.order.update({
+        where: { id: order.id },
+        data: {
+          paymentStatus: 'PAID',
+          orderStatus: 'CONFIRMED',
+          paymentMethod
+        }
+      });
+
+      await tx.sellerOrder.updateMany({
+        where: { orderId: order.id, status: 'PENDING' },
+        data: { status: 'PAID' }
+      });
+
+      await tx.auditLog.create({
+        data: {
+          userId: req.user.id,
+          action: 'EWALLET_PAYMENT_CONFIRMED',
+          entityType: 'Order',
+          entityId: order.id,
+          newValues: { orderNumber, paymentMethod, amountCentavos: order.grandTotalCentavos },
+          ipAddress: req.ip
+        }
+      });
+    });
+
+    res.json({
+      success: true,
+      message: `E-Wallet (${paymentMethod.toUpperCase()}) payment verified! Order is now CONFIRMED.`,
+      data: {
+        orderNumber: order.orderNumber,
+        paymentMethod,
+        paymentStatus: 'PAID',
+        orderStatus: 'CONFIRMED'
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/payments/fail-sandbox — Simulate E-Wallet Payment Failure & Retry Eligibility (FR-4.7)
+router.post('/fail-sandbox', authenticate, async (req, res, next) => {
+  try {
+    const { orderNumber, reason = 'Insufficient e-wallet balance or user cancelled authorization' } = req.body;
+    if (!orderNumber) {
+      return res.status(400).json({ success: false, message: 'Order number required' });
+    }
+
+    const order = await prisma.order.findUnique({ where: { orderNumber } });
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+
+    if (order.userId !== req.user.id && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    if (order.paymentStatus === 'PAID') {
+      return res.status(400).json({ success: false, message: 'Order is already paid' });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.payment.updateMany({
+        where: { orderId: order.id, status: 'PENDING' },
+        data: { status: 'FAILED' }
+      });
+
+      await tx.order.update({
+        where: { id: order.id },
+        data: { paymentStatus: 'FAILED' }
+      });
+
+      await tx.auditLog.create({
+        data: {
+          userId: req.user.id,
+          action: 'EWALLET_PAYMENT_FAILED',
+          entityType: 'Order',
+          entityId: order.id,
+          newValues: { orderNumber, reason },
+          ipAddress: req.ip
+        }
+      });
+    });
+
+    res.json({
+      success: true,
+      message: `Payment failed: ${reason}. You may retry payment using any supported e-wallet.`,
+      data: {
+        orderNumber: order.orderNumber,
+        paymentStatus: 'FAILED',
+        orderStatus: order.orderStatus
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/payments/webhook — PayMongo webhook handler (raw body for signature verification, FR-4.4 & FR-4.10)
 router.post('/webhook', async (req, res, next) => {
   try {
-    const rawBody = req.body; // raw Buffer from express.raw()
+    const rawBody = req.body;
 
-    // Verify webhook signature
     if (PAYMONGO_WEBHOOK_SECRET) {
       const signature = req.headers['paymongo-signature'];
       if (!signature) {
         return res.status(401).json({ success: false, message: 'Missing signature' });
       }
 
-      // PayMongo sends: t=timestamp,te=test_signature,li=live_signature
       const parts = signature.split(',').reduce((acc, part) => {
         const [key, val] = part.split('=');
         acc[key] = val;
@@ -207,13 +406,11 @@ router.post('/webhook', async (req, res, next) => {
         return res.status(400).json({ success: false, message: 'Missing order number in metadata' });
       }
 
-      // Idempotent processing
       const payment = await prisma.payment.findFirst({
         where: { idempotencyKey, status: 'PENDING' }
       });
 
       if (!payment) {
-        // Already processed or not found — return 200 to avoid retries
         return res.json({ success: true, message: 'Already processed or not found' });
       }
 
@@ -236,7 +433,6 @@ router.post('/webhook', async (req, res, next) => {
           }
         });
 
-        // Per DFD 4.3: transition all associated seller order slices to PAID
         await tx.sellerOrder.updateMany({
           where: { orderId: payment.orderId, status: 'PENDING' },
           data: { status: 'PAID' }
@@ -279,11 +475,11 @@ router.post('/simulate', authenticate, isAdmin, async (req, res, next) => {
     const idempotencyKey = uuidv4();
 
     await prisma.$transaction(async (tx) => {
-      // Create demo payment record
       await tx.payment.create({
         data: {
           orderId: order.id,
           provider: 'demo_simulation',
+          paymentMethod: order.paymentMethod || 'gcash',
           providerPaymentId: `DEMO-${uuidv4().slice(0, 8)}`,
           idempotencyKey,
           amountCentavos: order.grandTotalCentavos,
@@ -294,7 +490,6 @@ router.post('/simulate', authenticate, isAdmin, async (req, res, next) => {
         }
       });
 
-      // Update order
       await tx.order.update({
         where: { id: order.id },
         data: {
@@ -303,13 +498,11 @@ router.post('/simulate', authenticate, isAdmin, async (req, res, next) => {
         }
       });
 
-      // Per DFD 4.3 & 4.5: transition all associated seller order slices to PAID
       await tx.sellerOrder.updateMany({
         where: { orderId: order.id, status: 'PENDING' },
         data: { status: 'PAID' }
       });
 
-      // Audit log
       await tx.auditLog.create({
         data: {
           userId: req.user.id,
@@ -349,7 +542,7 @@ router.get('/:paymentId', authenticate, async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Payment not found' });
     }
 
-    if (payment.order.userId !== req.user.id && req.user.role !== 'ADMIN') {
+    if (payment.order.userId !== req.user.id && !['ADMIN', 'FINANCE_OFFICER'].includes(req.user.role)) {
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
@@ -359,12 +552,14 @@ router.get('/:paymentId', authenticate, async (req, res, next) => {
         id: payment.id,
         orderNumber: payment.order.orderNumber,
         provider: payment.provider,
+        paymentMethod: payment.paymentMethod,
         status: payment.status,
         amountCentavos: payment.amountCentavos,
         amountFormatted: `₱${(payment.amountCentavos / 100).toFixed(2)}`,
         currency: payment.currency,
         isDemo: payment.isDemo,
         verifiedAt: payment.verifiedAt,
+        financeVerified: payment.financeVerified,
         checkoutUrl: payment.providerCheckoutUrl,
         createdAt: payment.createdAt
       }

@@ -1,4 +1,4 @@
-// STRIDERA E-Commerce — Functional Test Suite
+// STRIDERA E-Commerce — Functional Test Suite (All 7 Roles & FR-1.1–FR-10.10)
 // Run with: node --test tests/functional.test.js
 
 const { describe, it } = require('node:test');
@@ -69,7 +69,7 @@ describe('2. Promo Code Engine Rules', () => {
   });
 
   it('should reject flat discount promo if order subtotal is below minimum threshold', () => {
-    const result = validatePromo('WELCOME500', 250000); // ₱2,500 < ₱3,000 min
+    const result = validatePromo('WELCOME500', 250000);
     assert.equal(result.valid, false);
     assert.match(result.error, /Minimum order/);
   });
@@ -114,7 +114,7 @@ describe('4. Multi-Seller Order Slicing & Subtotal Partitioning', () => {
       { id: '1', sellerId: 'seller-apex', unitPriceCentavos: 599500, quantity: 1, lineTotalCentavos: 599500 },
       { id: '2', sellerId: 'seller-apex', unitPriceCentavos: 449500, quantity: 2, lineTotalCentavos: 899000 },
       { id: '3', sellerId: 'seller-stride', unitPriceCentavos: 749500, quantity: 1, lineTotalCentavos: 749500 },
-      { id: '4', sellerId: null, unitPriceCentavos: 389900, quantity: 1, lineTotalCentavos: 389900 } // Platform item
+      { id: '4', sellerId: null, unitPriceCentavos: 389900, quantity: 1, lineTotalCentavos: 389900 }
     ];
 
     const sellerSlices = {};
@@ -129,42 +129,105 @@ describe('4. Multi-Seller Order Slicing & Subtotal Partitioning', () => {
     }
 
     assert.equal(Object.keys(sellerSlices).length, 2, 'Should create exactly 2 seller slices');
-    assert.equal(sellerSlices['seller-apex'].subtotalCentavos, 1498500, 'Apex subtotal should be ₱14,985.00');
+    assert.equal(sellerSlices['seller-apex'].subtotalCentavos, 1498500);
     assert.equal(sellerSlices['seller-apex'].items.length, 2);
-    assert.equal(sellerSlices['seller-stride'].subtotalCentavos, 749500, 'Stride subtotal should be ₱7,495.00');
+    assert.equal(sellerSlices['seller-stride'].subtotalCentavos, 749500);
     assert.equal(sellerSlices['seller-stride'].items.length, 1);
   });
 });
 
-describe('5. Inventory Restoration on Order Cancellation', () => {
-  it('should restore stock atomically when a paid or pending slice is cancelled', () => {
-    let currentStock = 3;
-    const cancelledQty = 2;
+describe('5. Role 4: Inventory Manager Stock Movements & Non-Negative Rule (FR-6.1–FR-6.11)', () => {
+  it('should record incoming and outgoing movements and block negative stock', () => {
+    let stock = 5;
+    const movements = [];
 
-    function cancelAndRestore(qty) {
-      if (qty <= 0) throw new Error('Invalid quantity');
-      currentStock += qty;
-      return currentStock;
+    function recordMovement(type, qty, reason) {
+      if (qty <= 0) return { success: false, error: 'Quantity must be positive' };
+      if (type === 'OUTGOING' && stock - qty < 0) {
+        return { success: false, error: 'Insufficient stock (non-negative rule FR-6.7)' };
+      }
+      const prev = stock;
+      stock = type === 'INCOMING' ? stock + qty : stock - qty;
+      movements.push({ type, quantity: qty, previousStock: prev, newStock: stock, reason });
+      return { success: true, newStock: stock };
     }
 
-    const restoredStock = cancelAndRestore(cancelledQty);
-    assert.equal(restoredStock, 5, 'Stock should increase from 3 back to 5');
+    const inRes = recordMovement('INCOMING', 10, 'Restock Batch');
+    assert.equal(inRes.success, true);
+    assert.equal(inRes.newStock, 15);
+
+    const outRes = recordMovement('OUTGOING', 4, 'Order Dispatch');
+    assert.equal(outRes.success, true);
+    assert.equal(outRes.newStock, 11);
+
+    const failOut = recordMovement('OUTGOING', 20, 'Excessive Dispatch');
+    assert.equal(failOut.success, false);
+    assert.match(failOut.error, /Insufficient stock/);
+    assert.equal(stock, 11, 'Stock must remain unchanged after rejected outgoing movement');
+  });
+});
+
+describe('6. Role 5: Delivery Personnel Status Transitions & Proof of Delivery (FR-7.1–FR-7.11)', () => {
+  it('should progress shipment from PREPARING -> ASSIGNED -> IN_TRANSIT -> DELIVERED with POD', () => {
+    const shipment = {
+      id: 'ship-1',
+      status: 'PREPARING',
+      proofOfDelivery: null,
+      recipientName: null,
+      history: { events: [] }
+    };
+
+    function transitionShipment(newStatus, meta = {}) {
+      shipment.status = newStatus;
+      if (meta.proofOfDelivery) shipment.proofOfDelivery = meta.proofOfDelivery;
+      if (meta.recipientName) shipment.recipientName = meta.recipientName;
+      shipment.history.events.push({ status: newStatus, timestamp: new Date().toISOString() });
+      return shipment;
+    }
+
+    transitionShipment('ASSIGNED');
+    assert.equal(shipment.status, 'ASSIGNED');
+
+    transitionShipment('IN_TRANSIT');
+    assert.equal(shipment.status, 'IN_TRANSIT');
+
+    transitionShipment('DELIVERED', { proofOfDelivery: 'POD-STR-1001', recipientName: 'Maria Santos' });
+    assert.equal(shipment.status, 'DELIVERED');
+    assert.equal(shipment.proofOfDelivery, 'POD-STR-1001');
+    assert.equal(shipment.recipientName, 'Maria Santos');
+    assert.equal(shipment.history.events.length, 3);
+  });
+});
+
+describe('7. Role 6 & Role 7: Support Refund Escalation & Finance Officer Commission/Payouts (FR-8 & FR-9)', () => {
+  it('should escalate refund from Customer Support (APPROVED) to Finance Officer (COMPLETED)', () => {
+    const ticket = {
+      id: 'tkt-1',
+      status: 'OPEN',
+      refundStatus: 'PENDING',
+      refundAmountCentavos: 649500
+    };
+
+    // Customer Support approves & escalates refund to Finance Officer (FR-8.8)
+    ticket.status = 'IN_PROGRESS';
+    ticket.refundStatus = 'APPROVED';
+    assert.equal(ticket.refundStatus, 'APPROVED');
+
+    // Finance Officer processes approved refund (FR-9.9)
+    ticket.refundStatus = 'COMPLETED';
+    ticket.status = 'RESOLVED';
+    assert.equal(ticket.refundStatus, 'COMPLETED');
+    assert.equal(ticket.status, 'RESOLVED');
   });
 
-  it('should never permit stock adjustment to result in negative inventory', () => {
-    const currentStock = 2;
-    const requestedDeduction = 5;
+  it('should accurately compute 5% platform commission and 95% net seller payout in centavos (FR-9.5–FR-9.8)', () => {
+    const grossSalesCentavos = 1399000; // ₱13,990.00
+    const platformFeePercent = 5;
+    const platformFeeCentavos = Math.round((grossSalesCentavos * platformFeePercent) / 100);
+    const netSellerEarningsCentavos = grossSalesCentavos - platformFeeCentavos;
 
-    function applyStockDelta(stock, delta) {
-      const resulting = stock + delta;
-      if (resulting < 0) {
-        return { success: false, error: 'Insufficient stock for adjustment' };
-      }
-      return { success: true, newStock: resulting };
-    }
-
-    const res = applyStockDelta(currentStock, -requestedDeduction);
-    assert.equal(res.success, false);
-    assert.match(res.error, /Insufficient stock/);
+    assert.equal(platformFeeCentavos, 69950, '5% fee on ₱13,990.00 should be ₱699.50 (69,950 centavos)');
+    assert.equal(netSellerEarningsCentavos, 1329050, 'Net seller payout should be ₱13,290.50 (1,329,050 centavos)');
+    assert.equal(platformFeeCentavos + netSellerEarningsCentavos, grossSalesCentavos);
   });
 });

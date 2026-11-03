@@ -1,268 +1,72 @@
-# Requirements Specification — STRIDERA E-Commerce
+# STRIDERA — Full Requirements Specification (`source/IPT.pdf` Alignment)
 
-> Version: 1.0 | Date: 2026-10-27
+## 1. System Overview & 7 User Roles
+STRIDERA is a multi-seller footwear e-commerce marketplace and enterprise operations platform supporting **7 distinct user roles** with Role-Based Access Control (RBAC):
 
-## Functional Requirements
-
-### FR-01: User Authentication & Account Management
-- FR-01.1: Users can register with email and password
-- FR-01.2: Users can log in and receive a session token (JWT)
-- FR-01.3: Users can log out (invalidate session)
-- FR-01.4: Users can request password reset via email
-- FR-01.5: Users can view/edit profile information
-- FR-01.6: Users can manage multiple saved addresses
-- FR-01.7: Users can view order history with details
-- FR-01.8: Sessions expire after configurable idle time
-- FR-01.9: Guest checkout allowed without registration
-
-### FR-02: Product Catalog & Search
-- FR-02.1: Homepage displays hero banner, new arrivals, trending, category sections
-- FR-02.2: Shop page shows searchable, filterable product catalog
-- FR-02.3: Filter by: category, audience (men/women), shoe type, size, color, price range, availability
-- FR-02.4: Sort by: newest, price (asc/desc), popularity
-- FR-02.5: Pagination or load-more with proper state
-- FR-02.6: Filter state reflected in shareable URL query parameters
-- FR-02.7: Empty, loading, and no-results states
-- FR-02.8: Clear-all-filters action
-- FR-02.9: Mobile filter drawer
-- FR-02.10: Product cards show image, name, category, price, sale price
-
-### FR-03: Product Detail Page
-- FR-03.1: Image gallery with thumbnails
-- FR-03.2: Product name, SKU, description, features
-- FR-03.3: Color variant selector with visual swatches
-- FR-03.4: Size selector (US 7-12)
-- FR-03.5: Per-variant stock indicator (in-stock/low/out-of-stock)
-- FR-03.6: Current and previous price (only for valid discounts)
-- FR-03.7: Quantity selector
-- FR-03.8: Add-to-cart (requires size + color selection first)
-- FR-03.9: Delivery/returns information
-- FR-03.10: Related products section
-- FR-03.11: Clear feedback for invalid selection or unavailable variant
-- FR-03.12: Wishlist toggle (if authenticated)
-
-### FR-04: Shopping Cart
-- FR-04.1: View cart items with image, name, size, color, unit price, quantity, subtotal
-- FR-04.2: Adjust quantity (with stock validation)
-- FR-04.3: Remove items
-- FR-04.4: Apply promo code
-- FR-04.5: Display subtotal, discount, shipping estimate, grand total
-- FR-04.6: Continue shopping link
-- FR-04.7: Checkout CTA
-- FR-04.8: Empty cart state
-- FR-04.9: Server-side revalidation of prices, discounts, and stock
-
-### FR-05: Checkout Flow
-- FR-05.1: Step 1: Customer information (name, email, phone)
-- FR-05.2: Step 2: Shipping address (with saved address option)
-- FR-05.3: Step 3: Delivery method (flat-rate shipping)
-- FR-05.4: Step 4: Order review (items, totals, address)
-- FR-05.5: Step 5: Payment method selection (GCash, Maya, GrabPay)
-- FR-05.6: Step 6: Payment processing (redirect to provider)
-- FR-05.7: Step 7: Order confirmation page
-- FR-05.8: Guest checkout with optional account creation
-- FR-05.9: All validation performed server-side
-- FR-05.10: Prevent duplicate order submissions (idempotency)
-
-### FR-06: Payment Processing
-- FR-06.1: Create payment session via PayMongo sandbox API (server-side)
-- FR-06.2: Redirect customer to payment provider UI
-- FR-06.3: Receive and verify webhook from PayMongo (server-side)
-- FR-06.4: Verify webhook signature
-- FR-06.5: Idempotent payment result processing
-- FR-06.6: Record provider transaction reference and status
-- FR-06.7: Handle success, failure, cancel, timeout, duplicate callbacks
-- FR-06.8: Order status: PENDING → PAID or FAILED
-- FR-06.9: Never mark order PAID from browser redirect/client message
-- FR-06.10: Demo fallback: "Simulate Payment Success" (DEMO_MODE=true, admin-only, audit-logged)
-
-### FR-07: Order Management
-- FR-07.1: Customer can view order list and detail
-- FR-07.2: Order detail shows items, totals, payment status, shipping status
-- FR-07.3: Order tracking information display
-- FR-07.4: Order status transitions are audit-logged
-
-### FR-08: Inventory Management
-- FR-08.1: Stock tracked per variant (size + color)
-- FR-08.2: Stock deducted atomically on order payment (transactional with row locking)
-- FR-08.3: Stock restored on payment failure/cancellation
-- FR-08.4: Stock movements recorded in audit log
-- FR-08.5: Out-of-stock variants disabled in UI
-
-### FR-09: Admin Dashboard
-- FR-09.1: Role-protected access (admin role required)
-- FR-09.2: Product CRUD (create, read, update, delete/deactivate)
-- FR-09.3: Category and collection management
-- FR-09.4: Product image management
-- FR-09.5: Size/color variant management
-- FR-09.6: Inventory management (stock updates with reason)
-- FR-09.7: Order list with status filters (UNPAID/PENDING vs PAID)
-- FR-09.8: Order detail with payment status and transaction refs
-- FR-09.9: Shipment status updates and tracking entry
-- FR-09.10: Promotion/promo code management
-- FR-09.11: Customer account list
-- FR-09.12: Basic sales and inventory reports
-- FR-09.13: All admin actions audit-logged
-
-### FR-10: Promotions
-- FR-10.1: Simple promo codes (flat-amount or percentage off)
-- FR-10.2: Promo code validation (active, not expired, usage limits)
-- FR-10.3: Applied server-side during cart/checkout
-- FR-10.4: Admin can create/edit/deactivate promo codes
-
-### FR-11: Wishlist
-- FR-11.1: Authenticated users can add/remove products to wishlist
-- FR-11.2: Wishlist viewable in account area
-- FR-11.3: Quick add-to-cart from wishlist
-
-### FR-12: Fulfillment & Notifications
-- FR-12.1: Manual fulfillment workflow (admin enters tracking)
-- FR-12.2: Configurable shipping fee
-- FR-12.3: Shipment status updates
-- FR-12.4: Email notification on order confirmation (sandbox/console)
-- FR-12.5: Email notification on shipment status change
-
-### FR-13: Multi-Seller Marketplace & Onboarding
-- FR-13.1: Prospective merchants can register for seller accounts with store name, description, and contact info
-- FR-13.2: Seller lifecycle state machine: NONE → PENDING → APPROVED / REJECTED / SUSPENDED
-- FR-13.3: Pending sellers receive 403 Forbidden with pending review banner upon accessing merchant portal
-- FR-13.4: Admin control center for reviewing merchant applications, approving/rejecting/suspending sellers
-- FR-13.5: Admin brand assignment to approved sellers
-
-### FR-14: Seller Product & Catalog Management
-- FR-14.1: Approved sellers can create, edit, and deactivate their own catalog products
-- FR-14.2: Strict tenant isolation: querying or mutating another seller's product returns 404 Not Found (not 403)
-- FR-14.3: Per-variant stock adjustments require mandatory human reason and log immutable audit movements
-- FR-14.4: Stock adjustments prevent negative inventory balances
-
-### FR-15: Multi-Seller Order Slicing & Partitioning
-- FR-15.1: Orders containing items from multiple sellers are atomically partitioned into `SellerOrder` slices
-- FR-15.2: Each slice calculates `subtotal_centavos` as the exact sum of line items belonging to that seller
-- FR-15.3: Integer centavos arithmetic guarantees `sum(slice.subtotalCentavos) === parentOrder.subtotalCentavos` without float drift
-- FR-15.4: Payment confirmation (webhook or simulation) propagates PAID status atomically across parent and child slices
-
-### FR-16: Merchant Fulfillment & Stock Restoration
-- FR-16.1: Sellers view and fulfill exclusively their own order slices (tenant-isolated with 404 for alien slices)
-- FR-16.2: Sellers update fulfillment status (SHIPPED) and record optional tracking numbers and URLs
-- FR-16.3: Sellers can cancel paid order slices with a mandatory cancellation reason
-- FR-16.4: Slicing cancellation atomically restores variant inventory and records `ORDER_CANCELLED` stock movement
-
-### FR-17: Platform Brand Directory & Governance
-- FR-17.1: Public brand directory page (`/brands`) and brand detail storefront (`/brands/[slug]`)
-- FR-17.2: Products filterable by brand slug across shop catalog and search
-- FR-17.3: Admin can create and manage brand entities and assign official merchant operators
+| Role # | Enum Value | Persona | Primary Portal Route | Demo Credentials (`Password123!`) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Role 1** | `CUSTOMER` | Shopper / Buyer | `/`, `/shop`, `/checkout`, `/account/profile` | `customer@stridera.ph` |
+| **Role 2** | `SELLER` | Merchant / Brand Partner | `/seller/dashboard`, `/seller/products`, `/seller/orders` | `seller@stridera.ph` / `solecraft@stridera.ph` |
+| **Role 3** | `ADMIN` | Platform Administrator / Presenter | `/admin/dashboard` | `admin@stridera.ph` |
+| **Role 4** | `INVENTORY_MANAGER` | Warehouse & Inventory Manager | `/inventory` | `inventory@stridera.ph` |
+| **Role 5** | `DELIVERY_PERSONNEL` | Courier / Delivery Personnel | `/delivery` | `delivery@stridera.ph` |
+| **Role 6** | `CUSTOMER_SUPPORT` | Customer Support Personnel | `/support` | `support@stridera.ph` |
+| **Role 7** | `FINANCE_OFFICER` | Treasury & Finance Officer | `/finance` | `finance@stridera.ph` |
 
 ---
 
-## Non-Functional Requirements
+## 2. Functional Requirements (`FR-1.1` – `FR-10.10`)
 
-### NFR-01: Performance
-- Page load < 3 seconds on broadband
-- Responsive images (WebP preferred), lazy-loaded below fold
-- Layout space reserved for images (no CLS)
-- Database indexes on frequently queried columns
-- API response pagination and result limits
-- Minimal JS bundle size
+### Feature 1: User Account & Role-Based Authentication (`FR-1.1` – `FR-1.10`)
+- **`FR-1.1`**: Customer registration with email, password, name, and phone.
+- **`FR-1.2`**: Seller registration with store name, description, logo, and business/DTI/TIN `identificationDetails` (`PENDING` approval status).
+- **`FR-1.3`**: Unified login supporting all **7 roles** (`CUSTOMER`, `SELLER`, `ADMIN`, `INVENTORY_MANAGER`, `DELIVERY_PERSONNEL`, `CUSTOMER_SUPPORT`, `FINANCE_OFFICER`).
+- **`FR-1.4`**: Password hashing with `bcrypt` and JWT session issuance (`httpOnly` cookie + `Bearer` token).
+- **`FR-1.5`**: Role-based route & API middleware enforcement (`requireAuth`, `requireSeller`, `requireAdmin`, `requireInventoryManager`, `requireDelivery`, `requireSupport`, `requireFinance`).
+- **`FR-1.6`**: Profile management (name, phone, avatar) via `PUT /api/auth/profile`.
+- **`FR-1.7`**: Password update (`PUT /api/auth/password`) and password recovery (`POST /api/auth/forgot-password`, `POST /api/auth/reset-password`).
+- **`FR-1.8`**: Multiple saved shipping addresses (`GET/POST/DELETE /api/auth/addresses`).
+- **`FR-1.9`**: Account status enforcement (`ACTIVE`, `SUSPENDED`, `DEACTIVATED`).
+- **`FR-1.10`**: Secure logout clearing session tokens.
 
-### NFR-02: Security
-- Argon2 password hashing (cost factor ≥ 10)
-- JWT in httpOnly, secure, sameSite cookies
-- CSRF token protection
-- XSS output encoding
-- Parameterized queries via Prisma ORM
-- Rate limiting: 5 attempts/minute on login, 10/minute on sensitive routes
-- File upload validation (type, size)
-- Mass-assignment protection
-- No secrets in client bundle or logs
-- No raw card data storage
-- Least-privilege DB accounts
-- Audit logging for all admin mutations
+### Feature 2: Multi-Seller Product Catalog, Search & Reviews (`FR-2.1` – `FR-2.12`)
+- **`FR-2.1` – `FR-2.7`**: Browse products across verified sellers; filter by category, brand, seller, size, color, and price range (`minPrice`, `maxPrice`); sort by newest, price ascending/descending, name; full-text search.
+- **`FR-2.8` – `FR-2.10`**: Product detail page with seller verification badge, interactive color/size variant matrix, real-time SKU stock badge, and out-of-stock protection.
+- **`FR-2.11` – `FR-2.12`**: Customer product reviews (`rating` 1–5) and seller ratings (`sellerRating` 1–5) via `POST /api/products/:slug/reviews`.
 
-### NFR-03: Accessibility
-- WCAG 2.1 AA compliance target
-- Semantic HTML5 elements
-- Keyboard navigable
-- Visible focus indicators
-- Color contrast ratio ≥ 4.5:1
-- Meaningful alt text for all product images
-- Form labels and error messages
-- prefers-reduced-motion honored
+### Feature 3: Shopping Cart, Checkout & Multi-Seller Order Slicing (`FR-3.1` – `FR-3.12`)
+- **`FR-3.1` – `FR-3.6`**: Multi-seller cart with variant SKU validation, quantity controls, subtotal, shipping fee (`₱150.00`, free ≥ `₱5,000.00`), and grand total in integer centavos (`PHP`).
+- **`FR-3.7` – `FR-3.9`**: Atomic checkout (`POST /api/orders`) that slices a single customer order into per-seller `SellerOrder` records and atomically decrements `ProductVariant.stockQuantity`.
+- **`FR-3.10` – `FR-3.12`**: Order detail tracking (`/account/orders/[orderNumber]`), customer receipt confirmation (`PATCH /api/orders/:orderNumber/confirm-receipt`), and pre-shipment order cancellation with automatic stock restoration (`PATCH /api/orders/:orderNumber/cancel`).
 
-### NFR-04: Responsiveness
-- Desktop: ≥ 1024px
-- Tablet: 768px – 1023px
-- Mobile: < 768px
-- Touch-friendly tap targets (≥ 44px)
-- Mobile filter drawer
-- Responsive navigation
+### Feature 4: E-Wallet Payment Processing (`FR-4.1` – `FR-4.12`)
+- **`FR-4.1` – `FR-4.6`**: Multi-wallet payment selection (`GCash`, `Maya`, `PayPal`) via `POST /api/payments/create-session`, generating either a live PayMongo session or an interactive Sandbox QR & Reference session.
+- **`FR-4.7` – `FR-4.12`**: Sandbox payment confirmation (`POST /api/payments/confirm-sandbox`), failure simulation & retry (`POST /api/payments/fail-sandbox`), HMAC-SHA256 webhook verification (`POST /api/payments/webhook`), idempotency key deduplication, and Admin demo fallback (`POST /api/payments/simulate`).
 
-### NFR-05: Maintainability
-- Consistent code style and conventions
-- Component-based architecture
-- Separation of concerns (presentation/business/data layers)
-- Environment-based configuration
-- Comprehensive documentation
+### Feature 5: Seller / Merchant Portal (`FR-5.1` – `FR-5.13`)
+- **`FR-5.1` – `FR-5.9`**: Seller store profile editing (`PUT /api/seller/profile`), product & SKU variant CRUD (`POST/PUT/DELETE /api/seller/products`), and strict tenant isolation (`404` on cross-seller access).
+- **`FR-5.10` – `FR-5.13`**: Order acceptance (`PATCH /api/seller/orders/:id/accept`), order fulfillment with courier & tracking number (`PATCH /api/seller/orders/:id/fulfill`) creating a `Shipment` record, slice cancellation (`PATCH /api/seller/orders/:id/cancel`), and earnings/commission/payout summary.
 
-### NFR-06: Data Integrity
-- Money stored as integer centavos (never floats)
-- Transactional writes for order + inventory
-- Idempotent payment callbacks
-- Referential integrity via foreign keys
-- Input validation at API boundary
+### Feature 6: Inventory Manager Portal (`FR-6.1` – `FR-6.11`)
+- **`FR-6.1` – `FR-6.11`**: Warehouse KPI dashboard (`GET /api/inventory/dashboard`), SKU stock listing (`GET /api/inventory/variants`), incoming stock logging (`POST /api/inventory/incoming`), outgoing dispatch logging (`POST /api/inventory/outgoing`), manual cycle-count adjustment (`PATCH /api/inventory/variants/:id/adjust`), non-negative stock invariant (`stockQuantity >= 0`), availability toggle (`PATCH /api/inventory/variants/:id/availability`), movement audit log (`GET /api/inventory/movements`), and seller valuation report (`GET /api/inventory/report`).
+
+### Feature 7: Delivery Personnel Portal (`FR-7.1` – `FR-7.11`)
+- **`FR-7.1` – `FR-7.11`**: Shipment manifest (`GET /api/delivery/shipments`), customer recipient address & contact view, assignment acceptance (`PATCH /api/delivery/shipments/:id/accept`), seller package collection (`PATCH /api/delivery/shipments/:id/collect`), transit status updates (`IN_TRANSIT`, `OUT_FOR_DELIVERY`, `DELIVERED`) with Proof of Delivery & recipient signature (`PATCH /api/delivery/shipments/:id/status`), and failed delivery / return-to-seller logging (`POST /api/delivery/shipments/:id/fail`).
+
+### Feature 8: Customer Support Personnel Portal (`FR-8.1` – `FR-8.11`)
+- **`FR-8.1` – `FR-8.11`**: Customer support ticket creation (`POST /api/support/tickets`), ticket queue (`GET /api/support/tickets`), order/payment/shipment diagnostic lookup (`GET /api/support/orders/lookup`), ticket messaging (`POST /api/support/tickets/:id/messages`), status transitions (`OPEN`, `IN_PROGRESS`, `RESOLVED`, `CLOSED`), cancellation/return approvals, and refund escalation (`refundStatus = APPROVED`) to the Finance Officer (`POST /api/support/tickets/:id/action`).
+
+### Feature 9: Finance Officer Portal (`FR-9.1` – `FR-9.11`)
+- **`FR-9.1` – `FR-9.11`**: Financial KPI dashboard (`GET /api/finance/dashboard`), e-wallet reference verification (`PATCH /api/finance/payments/:id/verify`), seller gross/commission/net calculation (`5%` platform fee), seller payout disbursement (`POST /api/finance/payouts`), approved customer refund processing (`POST /api/finance/refunds/:ticketId/process`), and executive financial summary report (`GET /api/finance/reports`).
+
+### Feature 10: Administrator Portal (`FR-10.1` – `FR-10.10`)
+- **`FR-10.1` – `FR-10.10`**: Executive KPIs (`GET /api/admin/reports`), 7-role user management (`GET /api/admin/users`, `PATCH /api/admin/users/:id/role`, `PATCH /api/admin/users/:id/status`), seller verification & brand assignment (`PATCH /api/admin/sellers/:id/status`, `PATCH /api/admin/sellers/:id/brand`), platform configuration (`GET/PUT /api/admin/platform-config`), read-only API secret audit (`GET /api/admin/config-status`), and immutable audit trail (`GET /api/admin/audit-logs`).
 
 ---
 
-## Sitemap
-
-```
-STRIDERA
-├── / (Homepage)
-├── /shop (Catalog with filters)
-│   ├── /shop?category=running
-│   ├── /shop?category=lifestyle
-│   ├── /shop?category=basketball
-│   └── /shop?category=training
-├── /product/:slug (Product Detail)
-├── /cart (Shopping Cart)
-├── /checkout (Multi-step Checkout)
-│   ├── /checkout/information
-│   ├── /checkout/shipping
-│   ├── /checkout/review
-│   └── /checkout/payment
-├── /order-confirmation/:id
-├── /account
-│   ├── /account/login
-│   ├── /account/register
-│   ├── /account/forgot-password
-│   ├── /account/profile
-│   ├── /account/addresses
-│   ├── /account/orders
-│   ├── /account/orders/:id
-│   └── /account/wishlist
-├── /admin (Dashboard — role-protected)
-│   ├── /admin/products
-│   ├── /admin/products/:id/edit
-│   ├── /admin/categories
-│   ├── /admin/orders
-│   ├── /admin/orders/:id
-│   ├── /admin/inventory
-│   ├── /admin/promotions
-│   ├── /admin/customers
-│   └── /admin/reports
-└── /404 (Not Found)
-```
-
-## User Navigation Flow
-
-```
-Guest/Customer:
-  Homepage → Browse by Category → Shop Page (filter/sort/search)
-  → Product Detail (select size/color) → Add to Cart
-  → Cart (review/adjust) → Checkout (info → shipping → review → payment)
-  → Payment Provider → Order Confirmation
-  → Account → Order History → Order Detail
-
-Admin:
-  Login → Admin Dashboard → Manage Products/Orders/Inventory/Promotions
-  → View Reports → Process Orders → Update Shipments
-```
+## 3. Non-Functional Requirements (`NFR-1` – `NFR-36`)
+- **Performance (`NFR-1` – `NFR-5`)**: Indexed catalog queries, pagination, atomic DB transactions, and responsive Next.js App Router rendering.
+- **Security (`NFR-6` – `NFR-12`)**: `bcrypt` password hashing (12 rounds), JWT validation, 7-role RBAC guards, seller tenant isolation (`404` for alien resources), rate limiting, Helmet headers, and read-only secret key masking.
+- **Reliability & Data Integrity (`NFR-13` – `NFR-19`)**: Integer centavos currency storage (`PHP`), non-negative stock invariant (`stockQuantity >= 0`), idempotent payment webhook deduplication, and automatic stock restoration on cancellation.
+- **Usability & Accessibility (`NFR-20` – `NFR-26`)**: High-contrast editorial footwear UI, 1-Click 7-Role Demo Switcher on `/account/login`, real-time stock indicators, interactive Sandbox E-Wallet QR modal, and mobile-first responsive layout.
+- **Maintainability & Portability (`NFR-27` – `NFR-36`)**: Modular Express route architecture, Prisma ORM schema + SQL migrations, embedded zero-install PGlite PostgreSQL server (`db-server.js`), and automated Node test suite (`tests/functional.test.js`, `tests/security.test.js`).

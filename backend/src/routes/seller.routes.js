@@ -1,17 +1,15 @@
-// Seller Routes — Multi-seller portal endpoints
+// Seller Routes — Multi-seller portal endpoints (FR-5.1 to FR-5.13)
 // Enforces tenant isolation: all queries scoped to req.user.id, returns 404 for alien records.
 const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
 const { authenticate, requireSeller } = require('../middleware/auth.middleware');
-const { createError } = require('../middleware/error.middleware');
-const { body, param, query, validationResult } = require('express-validator');
+const { body, validationResult } = require('express-validator');
 
-// All seller routes require authentication and APPROVED seller status
 router.use(authenticate, requireSeller);
 
 // ────────────────────────────────────────────────
-// 1. SELLER PROFILE & BRAND
+// 1. SELLER PROFILE & BRAND (FR-5.1, FR-5.2)
 // ────────────────────────────────────────────────
 
 // GET /api/seller/profile
@@ -29,6 +27,8 @@ router.get('/profile', async (req, res, next) => {
         sellerStatus: true,
         storeName: true,
         storeDescription: true,
+        storeLogoUrl: true,
+        identificationDetails: true,
         createdAt: true,
         brand: {
           select: { id: true, name: true, slug: true, description: true, logoUrl: true, isActive: true }
@@ -47,16 +47,20 @@ router.get('/profile', async (req, res, next) => {
 router.put('/profile', [
   body('storeName').optional().trim().notEmpty().withMessage('Store name cannot be empty'),
   body('storeDescription').optional().trim(),
+  body('storeLogoUrl').optional().trim(),
+  body('identificationDetails').optional().trim(),
   body('phone').optional().trim()
 ], async (req, res, next) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
 
-    const { storeName, storeDescription, phone } = req.body;
+    const { storeName, storeDescription, storeLogoUrl, identificationDetails, phone } = req.body;
     const updateData = {};
     if (storeName) updateData.storeName = storeName;
     if (storeDescription !== undefined) updateData.storeDescription = storeDescription;
+    if (storeLogoUrl !== undefined) updateData.storeLogoUrl = storeLogoUrl;
+    if (identificationDetails !== undefined) updateData.identificationDetails = identificationDetails;
     if (phone !== undefined) updateData.phone = phone;
 
     const updated = await prisma.user.update({
@@ -70,7 +74,9 @@ router.put('/profile', [
         phone: true,
         sellerStatus: true,
         storeName: true,
-        storeDescription: true
+        storeDescription: true,
+        storeLogoUrl: true,
+        identificationDetails: true
       }
     });
 
@@ -81,7 +87,7 @@ router.put('/profile', [
 });
 
 // ────────────────────────────────────────────────
-// 2. SELLER DASHBOARD METRICS
+// 2. SELLER DASHBOARD METRICS (FR-5.13)
 // ────────────────────────────────────────────────
 
 // GET /api/seller/dashboard
@@ -90,18 +96,37 @@ router.get('/dashboard', async (req, res, next) => {
     const sellerId = req.user.id;
 
     const [
+      sellerProfile,
+      config,
       totalProducts,
       totalOrders,
       shippedOrders,
       revenueResult,
       lowStockVariants,
-      recentOrders
+      recentOrders,
+      payouts
     ] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: sellerId },
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          phone: true,
+          storeName: true,
+          storeDescription: true,
+          storeLogoUrl: true,
+          identificationDetails: true,
+          sellerStatus: true
+        }
+      }),
+      prisma.platformConfig.findUnique({ where: { id: 'default' } }),
       prisma.product.count({ where: { sellerId, isActive: true } }),
       prisma.sellerOrder.count({ where: { sellerId } }),
-      prisma.sellerOrder.count({ where: { sellerId, status: 'SHIPPED' } }),
+      prisma.sellerOrder.count({ where: { sellerId, status: { in: ['SHIPPED', 'DELIVERED'] } } }),
       prisma.sellerOrder.aggregate({
-        where: { sellerId, status: { in: ['PAID', 'SHIPPED', 'DELIVERED'] } },
+        where: { sellerId, status: { in: ['PAID', 'CONFIRMED', 'PREPARING', 'SHIPPED', 'DELIVERED'] } },
         _sum: { subtotalCentavos: true }
       }),
       prisma.productVariant.findMany({
@@ -122,20 +147,35 @@ router.get('/dashboard', async (req, res, next) => {
         },
         orderBy: { createdAt: 'desc' },
         take: 5
+      }),
+      prisma.sellerPayout.findMany({
+        where: { sellerId },
+        orderBy: { createdAt: 'desc' },
+        take: 5
       })
     ]);
 
     const totalRevenueCentavos = revenueResult._sum.subtotalCentavos || 0;
+    const feePercent = config ? config.platformFeePercent : 5;
+    const platformFeeCentavos = Math.floor((totalRevenueCentavos * feePercent) / 100);
+    const netEarningsCentavos = totalRevenueCentavos - platformFeeCentavos;
 
     res.json({
       success: true,
       data: {
+        sellerProfile,
         totalProducts,
         totalOrders,
         shippedOrders,
         pendingOrders: totalOrders - shippedOrders,
         totalRevenueCentavos,
         totalRevenueFormatted: `₱${(totalRevenueCentavos / 100).toFixed(2)}`,
+        platformFeePercent: feePercent,
+        platformFeeCentavos,
+        platformFeeFormatted: `₱${(platformFeeCentavos / 100).toFixed(2)}`,
+        netEarningsCentavos,
+        netEarningsFormatted: `₱${(netEarningsCentavos / 100).toFixed(2)}`,
+        payouts,
         lowStockAlerts: lowStockVariants.map(v => ({
           variantId: v.id,
           productName: v.product.name,
@@ -161,7 +201,7 @@ router.get('/dashboard', async (req, res, next) => {
 });
 
 // ────────────────────────────────────────────────
-// 3. SELLER PRODUCT MANAGEMENT (Scoped to Seller)
+// 3. SELLER PRODUCT MANAGEMENT (FR-5.3 to FR-5.8)
 // ────────────────────────────────────────────────
 
 // GET /api/seller/products
@@ -227,7 +267,6 @@ router.get('/products/:id', async (req, res, next) => {
     });
 
     if (!product) {
-      // Per skill §4: Return 404, not 403, for another seller's records
       return res.status(404).json({ success: false, message: 'Product not found' });
     }
 
@@ -244,7 +283,7 @@ router.post('/products', [
   body('categoryId').isUUID().withMessage('Valid category ID required'),
   body('basePriceCentavos').isInt({ min: 100 }).withMessage('Base price must be at least ₱1.00 (100 centavos)'),
   body('audience').isIn(['MEN', 'WOMEN', 'UNISEX']).withMessage('Valid audience required'),
-  body('shoeType').isIn(['RUNNING', 'LIFESTYLE', 'BASKETBALL', 'TRAINING']).withMessage('Valid shoe type required')
+  body('shoeType').isIn(['RUNNING', 'LIFESTYLE', 'BASKETBALL', 'TRAINING', 'CASUAL', 'BOOTS']).withMessage('Valid shoe type required')
 ], async (req, res, next) => {
   try {
     const errors = validationResult(req);
@@ -252,7 +291,6 @@ router.post('/products', [
 
     const sellerId = req.user.id;
 
-    // Retrieve seller's assigned brand if any
     const seller = await prisma.user.findUnique({
       where: { id: sellerId },
       include: { brand: true }
@@ -387,7 +425,7 @@ router.delete('/products/:id', async (req, res, next) => {
 });
 
 // ────────────────────────────────────────────────
-// 4. SELLER VARIANT & STOCK MANAGEMENT
+// 4. SELLER VARIANT & STOCK MANAGEMENT (FR-5.7)
 // ────────────────────────────────────────────────
 
 // POST /api/seller/products/:id/variants
@@ -432,6 +470,7 @@ router.post('/products/:id/variants', [
           productVariantId: variant.id,
           quantityChange: stockQuantity,
           stockAfter: stockQuantity,
+          movementType: 'INCOMING',
           reason: 'SELLER_INITIAL_STOCK',
           referenceId: req.user.id
         }
@@ -455,7 +494,6 @@ router.patch('/variants/:variantId/stock', [
 
     const { quantityChange, reason } = req.body;
 
-    // Verify ownership through product.sellerId
     const variant = await prisma.productVariant.findUnique({
       where: { id: req.params.variantId },
       include: { product: true }
@@ -484,6 +522,7 @@ router.patch('/variants/:variantId/stock', [
           productVariantId: variant.id,
           quantityChange,
           stockAfter: newStock,
+          movementType: quantityChange >= 0 ? 'INCOMING' : 'OUTGOING',
           reason: `SELLER_ADJUSTMENT: ${reason.toUpperCase().replace(/\s+/g, '_')}`,
           referenceId: req.user.id
         }
@@ -520,7 +559,7 @@ router.patch('/variants/:variantId/stock', [
 });
 
 // ────────────────────────────────────────────────
-// 5. SELLER ORDERS & FULFILLMENT (Per DFD 5.0)
+// 5. SELLER ORDERS & FULFILLMENT (FR-5.9 to FR-5.12)
 // ────────────────────────────────────────────────
 
 // GET /api/seller/orders — List own order slices
@@ -542,10 +581,14 @@ router.get('/orders', async (req, res, next) => {
             select: {
               orderNumber: true,
               paymentStatus: true,
+              paymentMethod: true,
               createdAt: true,
               shippingFullName: true,
+              shippingPhone: true,
+              shippingAddressLine1: true,
               shippingCity: true,
               shippingProvince: true,
+              shippingPostalCode: true,
               shippingCountry: true
             }
           },
@@ -560,7 +603,8 @@ router.get('/orders', async (req, res, next) => {
               quantity: true,
               lineTotalCentavos: true
             }
-          }
+          },
+          shipments: true
         },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
@@ -589,7 +633,8 @@ router.get('/orders/:id', async (req, res, next) => {
       where: { id: req.params.id, sellerId: req.user.id },
       include: {
         order: true,
-        items: true
+        items: true,
+        shipments: true
       }
     });
 
@@ -609,9 +654,92 @@ router.get('/orders/:id', async (req, res, next) => {
   }
 });
 
-// PATCH /api/seller/orders/:id/fulfill — Mark slice SHIPPED (with tracking)
+// PATCH /api/seller/orders/:id/accept — Acknowledge & accept paid order for preparation (FR-5.10)
+router.patch('/orders/:id/accept', async (req, res, next) => {
+  try {
+    const sellerOrder = await prisma.sellerOrder.findFirst({
+      where: { id: req.params.id, sellerId: req.user.id },
+      include: { order: true, shipments: true }
+    });
+
+    if (!sellerOrder) {
+      return res.status(404).json({ success: false, message: 'Seller order slice not found' });
+    }
+
+    if (!['PENDING', 'PAID'].includes(sellerOrder.status)) {
+      return res.status(400).json({ success: false, message: `Order slice is already in ${sellerOrder.status} status` });
+    }
+
+    const now = new Date();
+    const defaultDriver = await prisma.user.findFirst({
+      where: { role: 'DELIVERY_PERSONNEL', isActive: true }
+    });
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const slice = await tx.sellerOrder.update({
+        where: { id: sellerOrder.id },
+        data: {
+          status: 'PREPARING',
+          acceptedAt: now
+        }
+      });
+
+      await tx.order.update({
+        where: { id: sellerOrder.orderId },
+        data: { shippingStatus: 'PREPARING', orderStatus: 'PROCESSING' }
+      });
+
+      if (sellerOrder.shipments.length === 0) {
+        await tx.shipment.create({
+          data: {
+            orderId: sellerOrder.orderId,
+            sellerOrderId: sellerOrder.id,
+            deliveryPersonnelId: defaultDriver ? defaultDriver.id : null,
+            carrier: 'STRIDERA Express Courier',
+            status: 'PREPARING',
+            notes: `Order accepted by ${req.user.storeName || 'Seller'}, preparing package for collection.`,
+            history: {
+              events: [
+                {
+                  status: 'PREPARING',
+                  note: `Order accepted by ${req.user.storeName || req.user.email} and queued for packing`,
+                  actor: req.user.email,
+                  timestamp: now.toISOString()
+                }
+              ]
+            }
+          }
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          userId: req.user.id,
+          action: 'SELLER_ACCEPT_ORDER_SLICE',
+          entityType: 'SellerOrder',
+          entityId: sellerOrder.id,
+          newValues: { status: 'PREPARING', acceptedAt: now },
+          ipAddress: req.ip
+        }
+      });
+
+      return slice;
+    });
+
+    res.json({
+      success: true,
+      message: 'Order accepted and marked as PREPARING for shipment.',
+      data: updated
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/seller/orders/:id/fulfill — Mark slice SHIPPED with courier & tracking (FR-5.11, FR-5.12)
 router.patch('/orders/:id/fulfill', [
   body('trackingNumber').trim().notEmpty().withMessage('Tracking number is required'),
+  body('carrier').optional().trim(),
   body('trackingUrl').optional().trim(),
   body('notes').optional().trim()
 ], async (req, res, next) => {
@@ -621,7 +749,7 @@ router.patch('/orders/:id/fulfill', [
 
     const sellerOrder = await prisma.sellerOrder.findFirst({
       where: { id: req.params.id, sellerId: req.user.id },
-      include: { order: true }
+      include: { order: true, shipments: true }
     });
 
     if (!sellerOrder) {
@@ -636,21 +764,78 @@ router.patch('/orders/:id/fulfill', [
       return res.status(400).json({ success: false, message: 'Cannot fulfill a cancelled order slice' });
     }
 
-    const { trackingNumber, trackingUrl, notes } = req.body;
+    const { trackingNumber, carrier = 'STRIDERA Express Courier', trackingUrl, notes } = req.body;
+    const now = new Date();
+
+    const defaultDriver = await prisma.user.findFirst({
+      where: { role: 'DELIVERY_PERSONNEL', isActive: true }
+    });
 
     const updatedSlice = await prisma.$transaction(async (tx) => {
       const slice = await tx.sellerOrder.update({
         where: { id: sellerOrder.id },
         data: {
           status: 'SHIPPED',
+          carrier,
           trackingNumber,
           trackingUrl: trackingUrl || null,
           notes: notes || null,
-          shippedAt: new Date()
+          acceptedAt: sellerOrder.acceptedAt || now,
+          shippedAt: now
         }
       });
 
-      // Check if all slices for the parent order are now SHIPPED
+      if (sellerOrder.shipments.length > 0) {
+        const existingShipment = sellerOrder.shipments[0];
+        const prevEvents = Array.isArray(existingShipment.history?.events) ? existingShipment.history.events : [];
+        await tx.shipment.update({
+          where: { id: existingShipment.id },
+          data: {
+            carrier,
+            trackingNumber,
+            trackingUrl: trackingUrl || null,
+            status: 'SHIPPED',
+            shippedAt: now,
+            notes: notes || existingShipment.notes,
+            history: {
+              events: [
+                ...prevEvents,
+                {
+                  status: 'SHIPPED',
+                  note: `Dispatched by ${req.user.storeName || 'Seller'} via ${carrier} (Tracking: ${trackingNumber})`,
+                  actor: req.user.email,
+                  timestamp: now.toISOString()
+                }
+              ]
+            }
+          }
+        });
+      } else {
+        await tx.shipment.create({
+          data: {
+            orderId: sellerOrder.orderId,
+            sellerOrderId: sellerOrder.id,
+            deliveryPersonnelId: defaultDriver ? defaultDriver.id : null,
+            carrier,
+            trackingNumber,
+            trackingUrl: trackingUrl || null,
+            status: 'SHIPPED',
+            shippedAt: now,
+            notes: notes || `Dispatched by ${req.user.storeName || 'Seller'}`,
+            history: {
+              events: [
+                {
+                  status: 'SHIPPED',
+                  note: `Dispatched by ${req.user.storeName || 'Seller'} via ${carrier} (Tracking: ${trackingNumber})`,
+                  actor: req.user.email,
+                  timestamp: now.toISOString()
+                }
+              ]
+            }
+          }
+        });
+      }
+
       const siblingSlices = await tx.sellerOrder.findMany({
         where: { orderId: sellerOrder.orderId }
       });
@@ -674,7 +859,7 @@ router.patch('/orders/:id/fulfill', [
           action: 'SELLER_FULFILL_SLICE',
           entityType: 'SellerOrder',
           entityId: sellerOrder.id,
-          newValues: { trackingNumber, status: 'SHIPPED' },
+          newValues: { carrier, trackingNumber, status: 'SHIPPED' },
           ipAddress: req.ip
         }
       });
@@ -682,13 +867,13 @@ router.patch('/orders/:id/fulfill', [
       return slice;
     });
 
-    res.json({ success: true, message: 'Order marked as shipped', data: updatedSlice });
+    res.json({ success: true, message: 'Order marked as shipped and shipment record created', data: updatedSlice });
   } catch (err) {
     next(err);
   }
 });
 
-// PATCH /api/seller/orders/:id/cancel — Cancel paid slice and restore stock (per DFD 5.4)
+// PATCH /api/seller/orders/:id/cancel — Cancel paid slice and restore stock
 router.patch('/orders/:id/cancel', [
   body('reason').trim().notEmpty().withMessage('Cancellation reason is required')
 ], async (req, res, next) => {
@@ -716,7 +901,6 @@ router.patch('/orders/:id/cancel', [
     const { reason } = req.body;
 
     await prisma.$transaction(async (tx) => {
-      // 1. Mark seller order cancelled
       await tx.sellerOrder.update({
         where: { id: sellerOrder.id },
         data: {
@@ -725,7 +909,6 @@ router.patch('/orders/:id/cancel', [
         }
       });
 
-      // 2. Restore stock for all items in this slice
       for (const item of sellerOrder.items) {
         await tx.productVariant.update({
           where: { id: item.productVariantId },
@@ -739,13 +922,13 @@ router.patch('/orders/:id/cancel', [
             productVariantId: item.productVariantId,
             quantityChange: item.quantity,
             stockAfter: afterVariant.stockQuantity,
+            movementType: 'INCOMING',
             reason: `SELLER_CANCEL_RESTORE: ${reason.toUpperCase().replace(/\s+/g, '_')}`,
             referenceId: req.user.id
           }
         });
       }
 
-      // 3. Log audit entry
       await tx.auditLog.create({
         data: {
           userId: req.user.id,
@@ -765,4 +948,3 @@ router.patch('/orders/:id/cancel', [
 });
 
 module.exports = router;
-

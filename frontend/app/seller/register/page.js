@@ -8,6 +8,8 @@ export default function SellerRegisterPage() {
   const [form, setForm] = useState({
     storeName: '',
     storeDescription: '',
+    storeLogoUrl: '',
+    identificationDetails: '',
     firstName: '',
     lastName: '',
     email: '',
@@ -37,7 +39,9 @@ export default function SellerRegisterPage() {
         lastName: form.lastName,
         phone: form.phone,
         storeName: form.storeName,
-        storeDescription: form.storeDescription
+        storeDescription: form.storeDescription,
+        storeLogoUrl: form.storeLogoUrl,
+        identificationDetails: form.identificationDetails
       });
 
       if (res.success) {
@@ -52,7 +56,6 @@ export default function SellerRegisterPage() {
 
   return (
     <div style={{ background: 'var(--color-bg)', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      {/* Header */}
       <header style={{ background: 'var(--color-surface)', borderBottom: '1px solid var(--color-border)', padding: 'var(--space-4) 0' }}>
         <div className="container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Link href="/" style={{ color: 'var(--color-text)', textDecoration: 'none', fontWeight: 700, fontSize: 'var(--text-lg)' }}>
@@ -64,14 +67,13 @@ export default function SellerRegisterPage() {
         </div>
       </header>
 
-      {/* Main Container */}
       <main className="container" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--space-12) var(--space-4)' }}>
         <div style={{
           background: 'var(--color-surface)',
           borderRadius: 'var(--radius-xl)',
           padding: 'var(--space-8)',
           boxShadow: 'var(--shadow-md)',
-          maxWidth: '560px',
+          maxWidth: '580px',
           width: '100%'
         }}>
           {submitted ? (
@@ -85,10 +87,10 @@ export default function SellerRegisterPage() {
                 ✓
               </div>
               <h2 style={{ fontSize: 'var(--text-2xl)', fontWeight: 700, marginBottom: 'var(--space-2)' }}>
-                Application Submitted!
+                Seller Application Submitted! (FR-5.1)
               </h2>
               <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', marginBottom: 'var(--space-6)', lineHeight: 1.6 }}>
-                Your merchant application for <strong>{form.storeName}</strong> has been received and is queued for platform administrator review. You will be notified once your brand profile is activated.
+                Your merchant application and identification details for <strong>{form.storeName}</strong> have been received and are queued for Administrator approval (FR-10.3).
               </p>
               <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'center' }}>
                 <Link href="/" className="btn btn-primary">Return to Storefront</Link>
@@ -99,10 +101,10 @@ export default function SellerRegisterPage() {
             <>
               <div style={{ marginBottom: 'var(--space-6)', textAlign: 'center' }}>
                 <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-3xl)', color: 'var(--color-brand-dark)' }}>
-                  Become a STRIDERA Merchant
+                  Become a STRIDERA Merchant (FR-5.1)
                 </h1>
                 <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', marginTop: 'var(--space-1)' }}>
-                  Sell your curated footwear brand on the Philippines' premier athletic marketplace.
+                  Submit your store profile and identification details for Administrator verification.
                 </p>
               </div>
 
@@ -122,111 +124,125 @@ export default function SellerRegisterPage() {
 
               <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Store / Merchant Brand Name</label>
+                  <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Store / Merchant Brand Name *</label>
                   <input
                     type="text"
                     required
                     placeholder="e.g. Apex Footwear Hub"
                     value={form.storeName}
                     onChange={e => setForm({ ...form, storeName: e.target.value })}
-                    style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                    className="form-input"
                   />
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Store Overview & Specialty</label>
+                  <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Store Overview &amp; Specialty</label>
                   <textarea
                     rows="2"
                     placeholder="Authorized distributor of performance and marathon running shoes..."
                     value={form.storeDescription}
                     onChange={e => setForm({ ...form, storeDescription: e.target.value })}
-                    style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                    className="form-input"
                   />
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Representative First Name</label>
+                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Business / DTI / TIN ID Details (FR-5.2) *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. DTI-NCR-2026-884120 / TIN 412-889-102"
+                      value={form.identificationDetails}
+                      onChange={e => setForm({ ...form, identificationDetails: e.target.value })}
+                      className="form-input"
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Store Logo URL (Optional)</label>
+                    <input
+                      type="text"
+                      placeholder="/assets/logo/stridera-logo.png"
+                      value={form.storeLogoUrl}
+                      onChange={e => setForm({ ...form, storeLogoUrl: e.target.value })}
+                      className="form-input"
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Representative First Name *</label>
                     <input
                       type="text"
                       required
                       placeholder="Juan"
                       value={form.firstName}
                       onChange={e => setForm({ ...form, firstName: e.target.value })}
-                      style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                      className="form-input"
                     />
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Last Name</label>
+                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Last Name *</label>
                     <input
                       type="text"
                       required
                       placeholder="Dela Cruz"
                       value={form.lastName}
                       onChange={e => setForm({ ...form, lastName: e.target.value })}
-                      style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                      className="form-input"
                     />
                   </div>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Business Email</label>
+                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Business Email *</label>
                     <input
                       type="email"
                       required
                       placeholder="vendor@company.ph"
                       value={form.email}
                       onChange={e => setForm({ ...form, email: e.target.value })}
-                      style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                      className="form-input"
                     />
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Contact Phone</label>
+                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Contact Phone *</label>
                     <input
                       type="tel"
                       required
                       placeholder="+63 917 123 4567"
                       value={form.phone}
                       onChange={e => setForm({ ...form, phone: e.target.value })}
-                      style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                      className="form-input"
                     />
                   </div>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Password (min 8 chars)</label>
+                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Password (min 8 chars) *</label>
                     <input
                       type="password"
                       required
                       minLength="8"
                       value={form.password}
                       onChange={e => setForm({ ...form, password: e.target.value })}
-                      style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                      className="form-input"
                     />
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Confirm Password</label>
+                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Confirm Password *</label>
                     <input
                       type="password"
                       required
                       minLength="8"
                       value={form.confirmPassword}
                       onChange={e => setForm({ ...form, confirmPassword: e.target.value })}
-                      style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                      className="form-input"
                     />
                   </div>
-                </div>
-
-                <div style={{
-                  background: 'var(--color-surface-raised)',
-                  padding: 'var(--space-3)',
-                  borderRadius: 'var(--radius-md)',
-                  fontSize: 'var(--text-xs)',
-                  color: 'var(--color-text-muted)'
-                }}>
-                  🛡️ All merchant accounts undergo administrative approval before listings become visible to shoppers.
                 </div>
 
                 <button
@@ -235,7 +251,7 @@ export default function SellerRegisterPage() {
                   className="btn btn-primary btn-full"
                   style={{ marginTop: 'var(--space-2)' }}
                 >
-                  {loading ? 'Submitting Application...' : 'Register as Merchant'}
+                  {loading ? 'Submitting Application...' : 'Submit Seller Verification Application'}
                 </button>
               </form>
             </>
@@ -245,4 +261,3 @@ export default function SellerRegisterPage() {
     </div>
   );
 }
-

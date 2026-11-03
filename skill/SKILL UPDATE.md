@@ -1,153 +1,180 @@
 ---
 name: stridera-revision
-description: Revises the existing Stridera footwear e-commerce prototype (shopper, seller and admin roles; sandbox e-wallet checkout in the style of GCash, Maya or PayPal) against IPT_revised.pdf, using the source/ folder (product images, logo, initial UI design) as a design and asset baseline rather than a complete specification. Use this skill whenever the user asks to audit, revise, extend, fix, restyle or document the Stridera project, add seller login or a seller dashboard, brand-specific listings, a multi-seller storefront, sandbox payment or webhook handling, a "Simulate Payment Success" fallback, variant stock, DFD or ERD updates, or a completion estimate for the shoe store, even if they do not name the skill.
+description: Revises, extends, audits, tests, and documents the Stridera multi-seller footwear e-commerce platform against source/IPT.pdf (7 user roles: Shopper, Seller/Merchant, Administrator/Presenter, Inventory Manager, Delivery Personnel, Customer Support Personnel, and Finance Officer; 10 Functional Requirement Feature Sets FR-1.1 to FR-10.10; 36 Non-Functional Requirements NFR-1 to NFR-36; 7 Process Flows; Level 0/1/2 DFDs; Proposed Data Model; and E-Wallet Sandbox API Integration for GCash, Maya, and PayPal). Use this skill whenever the user asks to audit, revise, build, extend, fix, restyle, test, or document the Stridera project.
 ---
 
-# Stridera Revision
+# Stridera Multi-Seller E-Commerce Platform Skill (`source/IPT.pdf` Complete Specification)
 
-You are revising an **existing** project, not building a new one. Stridera is a footwear e-commerce prototype: a shopper picks a shoe, size and color, pays with a sandboxed e-wallet, and watches the order flip from PENDING to PAID. The revision adds multi-seller support and closes gaps against `IPT_revised.pdf`.
+You are acting as a **Principal Full-Stack Software Engineer, Database Architect, Security Engineer, Prompt Engineer, UI/UX Designer, and QA Lead** revising and completing the **STRIDERA** multi-seller footwear e-commerce platform.
 
-Work as a senior full-stack engineer, database architect, security engineer, UI/UX designer and QA engineer. When priorities collide, rank them: transaction integrity, then security, then usability, then visual polish. A beautiful homepage on top of a checkout that can be tricked is a failed revision.
+Stridera showcases a seamless footwear shopping experience powered by e-wallet sandbox API integration (GCash, Maya, PayPal via PayMongo/Sandbox Adapter) alongside full multi-seller marketplace operations and role-isolated operational portals across **7 distinct user personas**.
 
-Governing sequence: **INSPECT SOURCE → AUDIT PROJECT → ANALYZE GAPS → PLAN → IMPLEMENT IN SLICES → VERIFY → DOCUMENT → REPORT**
+When priorities collide, rank them strictly:
+1. **Transaction & Inventory Integrity** (atomic stock operations, integer centavos arithmetic, idempotent payments)
+2. **Security & Role/Tenant Isolation** (RBAC across all 7 roles, strict seller isolation returning `404` for alien resources, hashed credentials, audit logging)
+3. **Functional Completeness & Zero Dead Controls** (every button, filter, modal, form, and workflow across all 7 portals works end-to-end)
+4. **Usability & Visual Polish** (responsive layout, clear status feedback, accessible controls, `prefers-reduced-motion` support)
 
-## 1. Ground rules
+Governing execution sequence:
+**INSPECT SOURCE → AUDIT PROJECT → ANALYZE GAPS → PLAN & SCHEMA → IMPLEMENT VERTICAL SLICES → VERIFY E2E → DOCUMENT → REPORT**
 
-1. **Revise, don't rebuild.** Detect the existing stack and conventions and stay inside them. Do not swap frameworks, ORMs or databases. Preserve working code. Change what a requirement or a defect forces you to change, and say why in the decision log.
-2. **Protect existing data.** Work on a git branch if the repo uses git (e.g. `revision/multi-seller`). Migrations are additive and reversible, run first on a copy of the database, and backfill existing rows so the current demo keeps working.
-3. **Never claim what you haven't proven.** "Complete" means implemented *and* tested. Test results are PASS, FAIL, BLOCKED or NOT RUN, with evidence. Never report a NOT RUN test as passed. Never invent provider responses, credentials or API keys.
-4. **No dead controls.** Every button, link, filter and form either works or is removed or disabled with an explanation. No essential feature may be left as a TODO or a static mockup.
-5. **Don't stall on small decisions.** Choose a secure, simple default, record it in `contents/documentation/decision-log.md`, and continue. Ask the user only when blocked (see Phase 0) or before a destructive change you cannot undo.
-6. **Sandbox only.** No real money, no stored card data. The UI shows a visible Sandbox / Demo indicator.
+---
 
-## 2. Source precedence
+## 1. Ground Rules & Engineering Invariants
 
-The `source/` folder is a **basis, not the whole specification**. It gives you the product images, the logo and the initial UI design to start from. It does not cap what the project may contain: the requirements call for pages (seller dashboard, admin tools, brand pages, auth screens) the initial UI may not have, and you design those in the same visual language. Never invent content the source already provides, and never treat a source mock-up as a ceiling.
+1. **Revise and Extend cleanly.** Preserve the existing stack (`Next.js 14 App Router` frontend, `Node.js / Express` backend, `Prisma ORM` + embedded `PGlite / PostgreSQL` database). All schema changes must be additive and backward-compatible.
+2. **Zero Dead Controls.** Every button, link, tab, filter, dropdown, modal, and form across all 7 role interfaces must perform a real, persisted action with clear visual feedback. Never leave `href="#todo"` or inert buttons.
+3. **Server is the Single Source of Truth.** Never trust client-supplied prices, subtotals, discounts, platform fees, seller earnings, user roles, or `sellerId`. Recompute all monetary values server-side in **integer centavos (`PHP`)**.
+4. **Payment Finalization has Exactly Two Verified Doors:**
+   - Door 1: Verified payment provider webhook/callback (`POST /api/payments/webhook` or sandbox checkout confirmation endpoint `/api/payments/confirm-sandbox`).
+   - Door 2: Authorized Demo Safety Fallback (`POST /api/payments/simulate` when `DEMO_MODE=true`).
+   - Both doors execute the exact same atomic transaction updating `Order`, `Payment`, and all child `SellerOrder` slices to `PAID`, recording transaction references and audit logs.
+5. **Resilient Sandbox E-Wallet Experience.** Even when external live API keys (`PAYMONGO_SECRET_KEY`) are not configured in local/offline environments, `POST /api/payments/create-session` must never dead-end with a `503`. It must gracefully generate a functional **Sandbox E-Wallet Checkout & QR Code Session** (supporting GCash, Maya, and PayPal) so the shopper or presenter can complete simulated payment interactions seamlessly.
+6. **Strict Role-Based Access Control (RBAC) & Seller Isolation:**
+   - Enforce server-side middleware checks for all **7 roles**: `CUSTOMER` (Shopper), `SELLER`, `ADMIN`, `INVENTORY_MANAGER`, `DELIVERY_PERSONNEL`, `CUSTOMER_SUPPORT`, and `FINANCE_OFFICER`.
+   - Sellers can only read/write their own products, variants, stock, and order slices. Attempting to access another seller's resource must return `404 Not Found` (preventing ID enumeration).
+7. **Atomic Stock Control & Movement Ledger.** Inventory quantities must never drop below `0` (`NFR-28`). Every stock change (initial seed, order checkout, cancellation restore, seller adjustment, inventory manager incoming/outgoing/manual adjustment, return restock) must atomically update `ProductVariant.stockQuantity` and write an immutable `StockMovement` record.
 
-When materials disagree, the higher rank wins. Record every conflict in `assumptions-and-gaps.md`; never silently replace an explicit requirement with a preference.
+---
 
-| Rank | Material | Governs | How to use it |
+## 2. Source Precedence & Reference Baseline
+
+| Rank | Source Material | Scope Governed | Rule |
 |---|---|---|---|
-| 1 | `IPT_revised.pdf` (find it under `source/`; distilled in `resources/requirements-baseline.md`) | Behavior, roles, scope, MoSCoW | Read the repo copy in full. If it differs from the baseline file, the repo copy wins; log the difference. |
-| 2 | Existing working code and database | What to preserve; conventions | Audit before changing. |
-| 3 | `source/` assets and initial UI design | Brand identity, imagery, starting layout, palette, type | Extract tokens from the actual files. Improve for hierarchy, responsiveness and accessibility. Log deliberate deviations. |
-| 4 | Best-practice baselines in `resources/` | Security, accessibility, performance, motion, testing | Apply wherever ranks 1-3 are silent. |
-| 5 | Nike Philippines (nike.com/ph) | Structure and usability inspiration only | Never copy logos, text, imagery or exact layouts. Never hotlink. |
+| **1** | `source/IPT.pdf` (22 pages) | All 7 user roles, Features 1–10 (`FR-1.1` to `FR-10.10`), `NFR-1` to `NFR-36`, Process Flows 1–7, DFDs, MoSCoW, Proposed Data Model | Authoritative functional & architectural specification. |
+| **2** | Existing Working Codebase & Database | Stack conventions, routes, Prisma models, existing tests | Extend without breaking existing passing functionality. |
+| **3** | `source/DFD/*.mmd`, `source/STRIDERA_LOGO.png`, `source/product_images/pcs/*` | Visual identity, footwear photography, diagram baselines | Keep `source/` read-only for binary assets; keep diagrams synchronized with implementation. |
 
-## 3. Workflow
+---
 
-Each phase has an exit condition. Do not move on until it is met.
+## 3. Complete Specification Distilled from `source/IPT.pdf`
 
-### Phase 0: Intake
-- Run `python scripts/inventory_source.py --help`, then run it (paths here are relative to this skill folder; run it from the project root). It drafts `contents/documentation/source-inventory.md` with facts a script can know.
-- **Open and read** every relevant file: the whole PDF, every image you will use, the logo, the initial UI design files. A filename is not an inspection. Fill in the Inspected, Purpose, Depends-on and Issues columns yourself, and say plainly when a file could not be read. Judge each item: usable as is, usable as a basis with improvement, outdated, duplicated or contradictory; note resolution, format and licensing concerns.
-- Treat `source/` as read-only. Derived copies (resized, compressed, converted) go through `scripts/derive_assets.py`, which records original → derived in `asset-manifest.md`.
-- Decision tree:
-  - No application code in the workspace → stop and tell the user. This skill revises; it does not scaffold.
-  - `source/` missing or empty → report it, continue with documented provisional assumptions, and do not call the result source-based.
-  - `IPT_revised.pdf` not found → use `resources/requirements-baseline.md` as a provisional baseline and say so.
-- Exit: inventory complete; PDF read; baseline requirements understood.
+### A. The 7 Identified User Roles & Context of Use (`Section B` & `FR-1.3`)
 
-### Phase 1: Audit the existing project
-- Detect stack, runtime, database and dependencies. Install, run the app, run any existing tests.
-- Map routes/pages, API endpoints, models and schema, auth, cart, checkout, payment, admin, and where product images come from.
-- Classify what you find as **works / broken / missing / risky**, with evidence (command output, file path, screenshot).
-- Flag anything in the Won't Have list that already exists. Leave working code alone, do not extend it, and note it.
-- Write `contents/documentation/audit-report.md`. Exit: you can state, per requirement, what the project does today.
+| # | Persona | Enum Role | Portal Route | Core Responsibilities |
+|---|---|---|---|---|
+| 1 | **The Shopper** | `CUSTOMER` | `/`, `/shop`, `/products/[slug]`, `/cart`, `/checkout`, `/account/orders`, `/account/profile` | Browse shoes, filter by category/brand/price/size/color/seller, view seller identity badges, select variants, checkout via e-wallet (GCash/Maya/PayPal) or QR code, track shipments, confirm order receipt, submit product/seller reviews, request cancellations/returns/refunds, open support inquiries. |
+| 2 | **The Seller / Merchant** | `SELLER` | `/seller/dashboard`, `/seller/products`, `/seller/orders`, `/seller/register` | Register store & identification details, manage store profile/logo, create/edit/archive products & variants (sizes, colors, SKUs, prices, stock), view own order slices, acknowledge/accept paid orders (`CONFIRMED`/`PREPARING`), enter courier & tracking numbers (`SHIPPED`), monitor store sales & net earnings. |
+| 3 | **The Administrator / Presenter** | `ADMIN` | `/admin/dashboard` | Oversee platform operations, approve/reject/suspend sellers & verify identification profiles, manage all user accounts (activate/deactivate/suspend) & assign roles across all 7 roles, manage brands/categories/promotions, monitor all orders/payments/shipments, configure platform settings & sandbox parameters, trigger Demo Simulate Payment, review system audit logs & marketplace reports. |
+| 4 | **The Inventory Manager** | `INVENTORY_MANAGER` | `/inventory` | Monitor stock levels across all sellers & variants, record incoming stock deliveries (`INCOMING`), record outgoing stock reductions (`OUTGOING`), perform manual stock adjustments with reasons (`ADJUSTMENT`), identify low-stock (`<= threshold`) and out-of-stock variants, update product availability, review movement history, generate inventory reports. |
+| 5 | **The Delivery Personnel** | `DELIVERY_PERSONNEL` | `/delivery` | View assigned shipments & customer delivery details, accept delivery assignments, confirm package collection from seller, update shipment status (`PREPARING`, `SHIPPED`, `IN_TRANSIT`, `OUT_FOR_DELIVERY`, `DELIVERED`), upload Proof of Delivery (photo URL / recipient acknowledgment), record failed deliveries with reason (`Incorrect Address`, `Recipient Unavailable`, `Damaged Package`, `Rejected` → `FAILED` / `RETURN_PENDING`), view shipment history. |
+| 6 | **The Customer Support Personnel** | `CUSTOMER_SUPPORT` | `/support` | View support dashboard & ticket queue, review customer account & order/payment/shipment details, respond to inquiries & complaints, process eligible order cancellation requests, coordinate return requests, review refund requests & escalate/forward for Finance approval, update ticket statuses (`OPEN`, `IN_PROGRESS`, `RESOLVED`, `CLOSED`), maintain support history. |
+| 7 | **The Finance Officer** | `FINANCE_OFFICER` | `/finance` | Monitor e-wallet transactions & verify payment references, monitor completed paid orders, calculate gross sales revenue, calculate marketplace platform fees (configurable `%`), calculate net seller earnings, record/simulate seller payouts, review & process approved refunds, maintain financial ledger history, generate financial reports. |
 
-### Phase 2: Gap analysis and traceability
-- Seed the matrix from `resources/requirements-baseline.md`; add revision-scope items from `resources/multi-seller-design.md`.
-- Classify each finding: Source-defined, Inferred, Missing, Conflicting, Recommended. Rate each gap blocker, major or minor.
-- Maintain `project-analysis.md`, `traceability-matrix.md` and `assumptions-and-gaps.md` under `contents/documentation/`. Templates are in `resources/docs-and-testing-templates.md`.
-- Exit: every requirement has an ID, a source reference, a classification, an affected component and a status.
+---
 
-### Phase 3: Technical plan
-- Produce the plan (use Antigravity's implementation-plan artifact if your session offers one): decisions, migration plan, to-be ERD and DFD drafts, ordered slices, risks.
-- Settle explicitly: order ownership across sellers, payment provider and adapter, how admin "configure API keys" is handled, category source, shipping fee handling. Defaults are in `resources/`.
-- Proceed unless something genuinely blocks you.
+### B. Functional Requirements Checklist (`Section C`: Features 1–10)
 
-### Phase 4: Implement in vertical slices
-Finish and test each slice before starting the next. Within every slice, build **Must, then Should, then Could**; start Could items only after all Must and Should items are verified. Commit per slice and update the matrix.
+#### Feature 1: User Authentication and Account Management (`FR-1.1` – `FR-1.10`)
+- `FR-1.1` **User Registration**: Shoppers register with name, email, contact number, and password (`POST /api/auth/register`).
+- `FR-1.2` **User Login**: Email & password login (`POST /api/auth/login`) with role-aware redirect and demo quick-login support.
+- `FR-1.3` **Role-Based Access Control**: Distinct dashboard access for all 7 roles (`CUSTOMER`, `SELLER`, `ADMIN`, `INVENTORY_MANAGER`, `DELIVERY_PERSONNEL`, `CUSTOMER_SUPPORT`, `FINANCE_OFFICER`).
+- `FR-1.4` **Seller Registration**: Merchants submit store name, description, contact info, and identification details (`POST /api/auth/register-seller`).
+- `FR-1.5` **Seller Account Verification**: Admin reviews, approves (`APPROVED`), rejects (`REJECTED`), or suspends (`SUSPENDED`) seller registrations (`PATCH /api/admin/sellers/:id/status`).
+- `FR-1.6` **Account Profile Management**: Users view and update personal info, phone, and saved addresses (`GET/PUT /api/auth/profile`, `/account/profile`).
+- `FR-1.7` **Password Management**: Users change passwords (`PUT /api/auth/password`) and request password recovery (`POST /api/auth/forgot-password`).
+- `FR-1.8` **Account Logout**: Ends active session (`POST /api/auth/logout`).
+- `FR-1.9` **Account Status Management**: Admin activates (`ACTIVE`), deactivates (`DEACTIVATED`), or suspends (`SUSPENDED`) user accounts (`PATCH /api/admin/users/:id/status`).
+- `FR-1.10` **Login Validation**: Validates credentials and account status, returning clear error messages.
 
-| Slice | Content | Read |
+#### Feature 2: Multi-Seller Product Selection & Filtering (`FR-2.1` – `FR-2.12`)
+- `FR-2.1` **Product Catalog Display**: Displays footwear with names, images, brands, prices, ratings, and descriptions.
+- `FR-2.2` **Product Categorization**: Organizes footwear into categories (Running, Lifestyle/Sneakers, Basketball, Training, Casual, Boots).
+- `FR-2.3` **Multi-Seller Product Listings**: Multiple sellers list products across brands/models.
+- `FR-2.4` **Seller Identification Display**: Displays seller store name, verified badge, and profile alongside listings on catalog cards, PDP, cart, and checkout.
+- `FR-2.5` **Product Search**: Keyword search across product names, brands, SKUs, and descriptions.
+- `FR-2.6` **Product Filtering**: Filter by category, brand, price range (`minPrice`, `maxPrice`), size, color, and seller (`sellerId`).
+- `FR-2.7` **Product Details**: Complete PDP with gallery, sizes, colors, prices, seller profile, and customer reviews.
+- `FR-2.8` **Product Variant Selection**: Interactive size and color swatches.
+- `FR-2.9` **Product Availability Checking**: Verifies variant stock before adding to cart.
+- `FR-2.10` **Product Price Display**: Shows active variant price or base price in PHP (`₱`).
+- `FR-2.11` **Out-of-Stock Notification**: Disables zero-stock size/color combinations and notifies shopper.
+- `FR-2.12` **Product Sorting**: Sort by price (`price-asc`, `price-desc`), newest (`newest`), oldest (`oldest`), and name (`name-asc`).
+
+#### Feature 3: Shopping Cart and Order Management (`FR-3.1` – `FR-3.12`)
+- `FR-3.1` – `FR-3.4` **Cart Operations**: Add to cart, display product/seller/size/color/qty/unit price, modify qty or remove, automatic server-side subtotal calculation.
+- `FR-3.5` **Cart Availability Validation**: Rechecks stock and product/seller active status at checkout.
+- `FR-3.6` – `FR-3.8` **Checkout & Order Creation**: Captures delivery address & contact info, displays complete order summary, creates `Order` and per-seller `SellerOrder` slices + initial `Shipment` records.
+- `FR-3.9` – `FR-3.12` **Order Lifecycle & History**: View order history (`/account/orders`), submit cancellation requests (`PATCH /api/orders/:orderNumber/cancel`), monitor order & shipment status, confirm order receipt (`PATCH /api/orders/:orderNumber/confirm-receipt`), view order confirmation (`/account/orders/[orderNumber]`).
+
+#### Feature 4: E-Wallet API Processing (`FR-4.1` – `FR-4.12`)
+- `FR-4.1` **Payment Method Selection**: Select `GCash`, `Maya`, or `PayPal` (plus `GrabPay`).
+- `FR-4.2` & `FR-4.3` **Payment Request & Link/QR Generation**: Sends order reference and amount to sandbox API (or built-in sandbox adapter) and returns checkout URL + simulated QR code payload.
+- `FR-4.4` – `FR-4.6` **Payment Processing, Verification & Status Update**: Completes payment in sandbox environment, verifies via webhook/callback, updates `Order`, `Payment`, and `SellerOrder` slices to `PAID`.
+- `FR-4.7` **Payment Failure Handling**: Handles failed, expired, or cancelled payments (`POST /api/payments/fail-session`) with clear user messaging and retry option.
+- `FR-4.8` & `FR-4.9` **Payment Reference Recording & Confirmation**: Records provider, reference number, amount, timestamp, and displays confirmation screen.
+- `FR-4.10` **Duplicate Payment Prevention**: Idempotency keys and status guards prevent double payment processing.
+- `FR-4.11` **Payment History**: Authorized users view payment transaction records.
+- `FR-4.12` **Payment Simulation**: Authorized demonstration feature (`POST /api/payments/simulate`) when sandbox API is unavailable.
+
+#### Feature 5: Seller Management & Store Operations (`FR-5.1` – `FR-5.13`)
+- `FR-5.1` & `FR-5.2` **Seller Dashboard & Store Profile**: Store overview, update store name, logo, description, contact info, and identification details.
+- `FR-5.3` – `FR-5.7` **Catalog & Stock Operations**: Create, edit, archive products; manage variants (sizes, colors, SKUs); view and adjust stock quantities with reason.
+- `FR-5.8` – `FR-5.12` **Seller Order Fulfillment**: View own order slices and customer delivery details; **acknowledge/accept paid orders (`CONFIRMED` / `PREPARING`)**; update packing status; enter courier and tracking number (`SHIPPED`) and hand over to delivery personnel; or cancel with reason and auto-restore stock.
+- `FR-5.13` **Sales Monitoring**: View gross sales, platform fee deductions, net earnings, payouts, and order history.
+
+#### Feature 6: Inventory Management (`FR-6.1` – `FR-6.11`)
+- `FR-6.1` – `FR-6.3` **Inventory Dashboard & Variant Monitoring**: View all products across sellers, variant stock by size/color, low-stock and out-of-stock counts.
+- `FR-6.4` **Incoming Stock Recording**: Record newly received footwear stock (`POST /api/inventory/incoming`).
+- `FR-6.5` **Outgoing Stock Recording**: Record stock reductions from sales or authorized outgoing dispatches (`POST /api/inventory/outgoing`).
+- `FR-6.6` **Stock Adjustment**: Manual stock correction with recorded reason (`PATCH /api/inventory/variants/:id/adjust`).
+- `FR-6.7` & `FR-6.8` **Low-Stock Identification & Availability Updating**: Flag variants `<= lowStockThreshold` and automatically/manually update variant/product availability.
+- `FR-6.9` & `FR-6.10` **Movement History & Inventory Reporting**: Full filterable ledger of `StockMovement` entries and exportable/viewable inventory summary report (`GET /api/inventory/report`).
+- `FR-6.11` **Inventory Access Control**: Restricted to `INVENTORY_MANAGER` and `ADMIN`.
+
+#### Feature 7: Delivery and Shipment Management (`FR-7.1` – `FR-7.11`)
+- `FR-7.1` – `FR-7.3` **Delivery Dashboard & Assignment Viewing**: View shipments, customer delivery address, contact details, and package items.
+- `FR-7.4` & `FR-7.5` **Assignment Acceptance & Package Collection**: Accept delivery assignment (`PATCH /api/delivery/shipments/:id/accept`) and confirm package collection from seller (`PATCH /api/delivery/shipments/:id/collect`).
+- `FR-7.6` – `FR-7.9` **Status Updates, Tracking & Proof of Delivery**: Update statuses (`PREPARING`, `SHIPPED`, `IN_TRANSIT`, `OUT_FOR_DELIVERY`, `DELIVERED`), upload proof of delivery URL/photo and recipient acknowledgment (`PATCH /api/delivery/shipments/:id/status`).
+- `FR-7.10` **Failed Delivery Recording**: Record failed delivery attempt with reason (`Incorrect Address`, `Recipient Unavailable`, `Damaged Package`, `Rejected`) setting status to `FAILED` / `RETURN_PENDING`.
+- `FR-7.11` **Shipment History**: Maintain timestamped log of every shipment status transition.
+
+#### Feature 8: Customer Support Management (`FR-8.1` – `FR-8.11`)
+- `FR-8.1` – `FR-8.3` **Support Dashboard & Ticket Creation**: Shoppers submit inquiries, complaints, cancellation requests, return requests, or refund requests (`POST /api/support/tickets`), generating a tracked support ticket.
+- `FR-8.4` – `FR-8.6` **Customer/Order Inspection & Inquiry Response**: Support personnel inspect linked customer, order, payment, and shipment records, and post responses (`POST /api/support/tickets/:id/messages`).
+- `FR-8.7` – `FR-8.9` **Cancellation, Return & Refund Handling**: Process eligible order cancellations (restoring stock), approve/coordinate product returns, and review/escalate refund requests to Finance (`PATCH /api/support/tickets/:id/action`).
+- `FR-8.10` & `FR-8.11` **Ticket Status & History**: Update ticket statuses (`OPEN`, `IN_PROGRESS`, `RESOLVED`, `CLOSED`) and preserve full message and resolution audit history.
+
+#### Feature 9: Financial Management (`FR-9.1` – `FR-9.11`)
+- `FR-9.1` – `FR-9.4` **Finance Dashboard, Transaction Verification & Completed Orders**: Monitor all e-wallet transactions, verify payment references (`PATCH /api/finance/payments/:id/verify`), and inspect paid orders.
+- `FR-9.5` – `FR-9.7` **Revenue, Platform Fee & Seller Earnings Calculation**: Compute gross sales revenue, platform service fees (based on configured fee `%`), and net seller earnings per seller and across the marketplace.
+- `FR-9.8` **Seller Payout Recording**: Record or simulate seller payout disbursements (`POST /api/finance/payouts`).
+- `FR-9.9` **Refund Monitoring & Execution**: Monitor pending/approved/completed refunds and record refund transactions (`POST /api/finance/refunds/:ticketId/process`).
+- `FR-9.10` & `FR-9.11` **Financial Reporting & Ledger History**: Generate comprehensive financial reports and maintain historical transaction records (`GET /api/finance/reports`).
+
+#### Feature 10: Administrator and Platform Management (`FR-10.1` – `FR-10.10`)
+- `FR-10.1` **Administrator Dashboard**: High-level KPIs across users, sellers, products, orders, payments, tickets, and finances.
+- `FR-10.2` & `FR-10.4` **User Account & Role Management**: View all users, change user roles across all 7 roles (`PATCH /api/admin/users/:id/role`), and activate/deactivate/suspend accounts (`PATCH /api/admin/users/:id/status`).
+- `FR-10.3` **Seller Verification Management**: Review seller identification details and approve/reject/suspend sellers.
+- `FR-10.5` – `FR-10.7` **Product, Order & Payment Monitoring**: Full visibility and override controls across all products, orders, shipments, and payment logs.
+- `FR-10.8` **System Activity Logging**: Immutable audit trail (`AuditLog`) of all sensitive actions across roles.
+- `FR-10.9` **System Configuration**: Manage platform settings (`platformFeePercent`, `lowStockThreshold`, `shippingFeeCentavos`, `freeShippingThresholdCentavos`, `enabledPaymentMethods`) plus read-only masked environment secret inspection.
+- `FR-10.10` **Report Viewing**: View overall marketplace operational and financial summaries.
+
+---
+
+## 4. Implementation Vertical Slices
+
+| Slice | Scope | Key Deliverables |
 |---|---|---|
-| A | Data foundation: additive migrations, backfill, roles, auth, seller approval | `multi-seller-design.md` |
-| B | Seller domain: dashboard, product/variant CRUD, stock adjustment, seller order view | `multi-seller-design.md` |
-| C | Storefront: categories, variant picker, out-of-stock disabling, search and filter, brand pages | `multi-seller-design.md`, `design-motion-a11y.md` |
-| D | Cart, checkout, e-wallet payment, webhook, simulate fallback, confirmation | `payment-and-order-flow.md` |
-| E | Admin: sellers, brands, all orders, inventory, payment/webhook log, config status | `multi-seller-design.md` |
-| F | Design system, motion, accessibility, performance polish | `design-motion-a11y.md` |
+| **Slice A** | **Data Foundation & 7-Role Auth** | Prisma schema with 7 roles, account status, seller identification, shipments history, support tickets/messages, seller payouts, product reviews, platform config; additive migration & seed with demo accounts for all 7 roles. |
+| **Slice B** | **Storefront, Multi-Seller Filtering & Reviews** | Seller filter, size/color/price filters, fixed price sorting, seller identity badges on cards & PDP, customer product/seller reviews. |
+| **Slice C** | **Cart, Resilient E-Wallet Sandbox & Order Lifecycle** | Interactive e-wallet method selector (`GCash`, `Maya`, `PayPal`), built-in Sandbox Checkout & QR Code modal when offline/no API key, Demo Simulate Payment, Shopper Order Detail page (`/account/orders/[orderNumber]`), Receipt Confirmation, Cancel/Return/Refund request submission. |
+| **Slice D** | **Seller Portal Enhancements** | Store profile & identification management, Acknowledge/Accept Paid Order (`CONFIRMED`/`PREPARING`), Packing & Shipment handoff, Seller Earnings & Platform Fee breakdown. |
+| **Slice E** | **Inventory Manager Portal (`/inventory`)** | Inventory dashboard, seller/variant stock table, Incoming Stock form, Outgoing Stock form, Manual Adjustment, Low-Stock alerts, Availability toggle, Movement History, Inventory Report. |
+| **Slice F** | **Delivery Personnel Portal (`/delivery`)** | Assigned shipments dashboard, Accept Assignment, Confirm Collection from Seller, Status progression (`SHIPPED` → `IN_TRANSIT` → `OUT_FOR_DELIVERY` → `DELIVERED`), Proof of Delivery upload, Failed Delivery & Return initiation, Shipment History timeline. |
+| **Slice G** | **Customer Support Portal (`/support`)** | Ticket queue (`OPEN`, `IN_PROGRESS`, `RESOLVED`, `CLOSED`), customer/order/payment/shipment inspector, Inquiry response thread, Cancellation processing, Return coordination, Refund approval & escalation to Finance. |
+| **Slice H** | **Finance Officer Portal (`/finance`)** | Financial KPI dashboard, E-Wallet transaction verification, Revenue / Platform Fee / Net Seller Earnings calculator, Seller Payout recording/simulation, Refund transaction processing, Financial Report generator. |
+| **Slice I** | **Administrator Governance (`/admin/dashboard`)** | 7-Role User & Permission Manager, Account Status toggles, Seller ID verification, Platform Settings configuration form, System Audit Logs, Marketplace Reports. |
+| **Slice J** | **Diagrams, Documentation & Verification** | Synchronized Level 0/1/2 DFDs & ERD, updated `contents/documentation/*`, automated functional/security/E2E tests passing 100%. |
 
-### Phase 5: Verify
-- Execute the test plan in `resources/docs-and-testing-templates.md`: functional, security, UI. If your session has a browser tool, use it for UI and end-to-end checks and save screenshots under `contents/test-reports/`.
-- Record preconditions, steps, expected, actual and status for each test. Fix defects and re-run.
-- Verify database consistency after the payment and stock tests: no negative stock, no PAID order without a verified transaction, no orphan rows.
+---
 
-### Phase 6: Document and hand over
-- Update the DFDs (Level 0, Level 1, Level 2 for checkout and payment, inventory, seller fulfillment) and the ERD so they match the code as built. Diagrams that describe an aspiration instead of the implementation are wrong.
-- Document the API in `contents/documentation/api.md` (methods, request fields, response shape, error codes).
-- Update `README.md`: setup, `.env.example` (placeholders only), migration and seed commands, run/build/test commands, sandbox configuration, webhook setup including local tunneling for testing, deployment notes (HTTPS, secure cookies, env secrets), backup and recovery, troubleshooting.
-- Write a demo runbook for the presenter: Browse → Select options → Cart → E-wallet checkout → Success, plus the Simulate Payment fallback.
-- Keep `contents/README.md` as an index of every generated document.
+## 5. Definition of Done (DoD)
 
-### Phase 7: Final report
-Summarize what was implemented, the stack and decisions, folder structure, DFD/ERD locations, setup steps, API and environment configuration, test results, security and accessibility notes, known limitations and next steps. Close with the **completion estimate**: report *verified* completion and *implemented* completion separately, broken down by Must / Should / Could and by area, using the method in `resources/docs-and-testing-templates.md`. Only verified items count as done.
-
-## 4. Engineering rules that do not bend
-
-These exist because a prototype that mishandles money, stock or permissions teaches the wrong lesson in a live demo.
-
-- **The server is the source of truth** for prices, totals, stock, role and ownership. Ignore any price, total, role, `seller_id` or `brand_id` sent by the browser.
-- **PAID has exactly two doors**: a verified provider webhook, or the gated Simulate Payment Success path. Both call the same finalize function. A redirect back to the site, or a query string, never marks an order paid.
-- **Seller isolation**: derive the seller from the session and scope every seller query by it. Return 404, not 403, for another seller's records. Sellers cannot touch approval, roles, API configuration, webhook logs or system logs; those are admin-only.
-- **Money** is integer minor units or DECIMAL, never floats. Currency is PHP only.
-- **Stock** is decremented on successful payment with a conditional update inside a transaction (`... WHERE stock_quantity >= :qty`, check affected rows). Never allow negative stock.
-- **Idempotency**: duplicate webhooks, double-clicked "Pay Now" and repeated checkout submissions must not create duplicate orders, payments or stock movements.
-- **Auth basics**: modern password hashing (argon2id or bcrypt per the stack), secure session cookies, CSRF protection where cookies authenticate, login rate limiting, parameterized queries, output encoding, validated image uploads, mass-assignment protection, audit log for admin and seller-sensitive actions, generic error messages, no secrets, tokens or unnecessary personal data in logs.
-- **Secrets** live in environment variables, never in frontend code, docs or source files. "Configure API keys" in the admin UI means a read-only configuration status page (which variables are set, mode, masked values), not storing secret keys in the database.
-- **Internal files stay internal**: do not serve `source/` or `contents/` through public routes.
-
-## 5. Folder conventions
-
-The existing structure wins; add the following only where missing, and document any structural change.
-
-```text
-source/        read-only inputs (never edit, rename or delete)
-contents/
-  documentation/   source-inventory, audit-report, project-analysis, traceability-matrix,
-                   assumptions-and-gaps, decision-log, design-system, implementation-notes,
-                   api, asset-manifest, demo-runbook, completion-report
-  diagrams/        dfd-level-0.mmd, dfd-level-1.mmd, dfd-level-2-checkout.mmd,
-                   dfd-level-2-inventory.mmd, dfd-level-2-fulfillment.mmd, erd.mmd
-  wireframes/  generated-content/  test-reports/  README.md
-database/migrations/  database/seeds/   (or the project's own equivalent)
-tests/   .env.example   README.md
-```
-
-Generated documentation never mixes with source materials. Also add a sitemap and user-flow diagram under `contents/diagrams/`.
-
-## 6. Definition of done
-
-- [ ] Source inventory complete and every inspected file marked honestly
-- [ ] Every requirement traced to source, classification, component, test and status; none marked verified without evidence
-- [ ] Gaps and conflicts documented, including the ones already found in `requirements-baseline.md`
-- [ ] Product data, images and prices come from the database; demo data is clearly labeled as demonstration data; no fake reviews, discounts or availability presented as real
-- [ ] Shopper, seller and admin permissions enforced on the server, with tests for cross-seller access
-- [ ] Checkout, webhook, simulate fallback and stock behave correctly under repeated and concurrent requests
-- [ ] Out-of-stock size/color combinations are disabled; search, filters and variant pricing work against real data
-- [ ] DFDs and ERD match the implementation
-- [ ] Motion is purposeful and `prefers-reduced-motion` is respected; keyboard and screen-reader basics pass
-- [ ] Original source files untouched; derived assets tracked in the manifest
-- [ ] README, `.env.example`, seed and demo instructions work from a clean checkout
-- [ ] Final report lists limitations honestly, with the completion estimate
-
-## 7. Bundled resources
-
-Read each file when you reach the phase that needs it, not all up front.
-
-- `resources/requirements-baseline.md`: IPT_revised.pdf distilled into numbered requirements, scope guard, and conflicts already spotted. Read in Phases 0-2.
-- `resources/multi-seller-design.md`: roles, seller approval, brand rule, schema changes, authorization matrix, order ownership, migration plan. Read in Phases 2-4 (slices A, B, C, E).
-- `resources/payment-and-order-flow.md`: checkout, provider adapter, webhook, simulate fallback, state machines, stock rules. Read for slice D.
-- `resources/design-motion-a11y.md`: deriving the design system from `source/`, tokens, motion catalog, accessibility, performance. Read for slices C and F.
-- `resources/docs-and-testing-templates.md`: templates, DFD/ERD requirements, test plan, completion method. Read in Phases 2, 5, 6, 7.
-- `scripts/inventory_source.py`, `scripts/derive_assets.py`: run with `--help` first; treat as black boxes.
+- [ ] `skill/SKILL UPDATE.md` and `skill/SKILL.md` updated to reflect the complete 22-page `source/IPT.pdf`.
+- [ ] All **7 user roles** (`CUSTOMER`, `SELLER`, `ADMIN`, `INVENTORY_MANAGER`, `DELIVERY_PERSONNEL`, `CUSTOMER_SUPPORT`, `FINANCE_OFFICER`) seeded with working demo credentials and accessible via 1-click Demo Role Switcher on `/account/login`.
+- [ ] All **10 Functional Requirement Feature Sets** (`FR-1.1` through `FR-10.10`) and **36 Non-Functional Requirements** (`NFR-1` through `NFR-36`) implemented, traced, and verified.
+- [ ] Zero bugs, zero duplicate declarations, zero broken links (`/account/orders/[orderNumber]`, `/account/profile`, `/inventory`, `/delivery`, `/support`, `/finance`, `/admin/dashboard`, `/seller/dashboard` all render and function properly).
+- [ ] Automated unit, security, and live API integration tests pass 100%.
+- [ ] All DFDs, ERD, sitemap, and documentation under `contents/` updated to match the exact implementation.

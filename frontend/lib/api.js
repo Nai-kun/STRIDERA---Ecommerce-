@@ -1,21 +1,25 @@
-// Shared API utility
+// Shared API utility across all 7 STRIDERA User Roles & Portals
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
 
 export async function apiFetch(endpoint, options = {}) {
   const url = `${API_BASE}${endpoint}`;
+  const token = typeof window !== 'undefined' ? localStorage.getItem('stridera_token') : null;
+
   const res = await fetch(url, {
     credentials: 'include',
+    ...options,
     headers: {
       'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers
-    },
-    ...options
+    }
   });
 
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    const err = new Error(data.message || 'API request failed');
+    const errMsg = data.message || data.error?.message || 'API request failed';
+    const err = new Error(errMsg);
     err.status = res.status;
     err.data = data;
     throw err;
@@ -24,18 +28,18 @@ export async function apiFetch(endpoint, options = {}) {
   return data;
 }
 
-// Products
+// Products & Reviews
 export const getProducts = (params = {}) => {
   const qs = new URLSearchParams(params).toString();
   return apiFetch(`/products${qs ? '?' + qs : ''}`);
 };
-
+export const getProductFilters = () => apiFetch('/products/filters');
 export const getProduct = (slug) => apiFetch(`/products/${slug}`);
+export const submitProductReview = (slug, data) =>
+  apiFetch(`/products/${slug}/reviews`, { method: 'POST', body: JSON.stringify(data) });
 
-// Categories
+// Categories & Brands
 export const getCategories = () => apiFetch('/categories');
-
-// Brands
 export const getBrands = () => apiFetch('/brands');
 export const getBrand = (slug) => apiFetch(`/brands/${slug}`);
 
@@ -48,20 +52,44 @@ export const updateCartItem = (itemId, quantity) =>
 export const removeCartItem = (itemId) =>
   apiFetch(`/cart/items/${itemId}`, { method: 'DELETE' });
 
-// Auth
+// Auth & Account
 export const login = (email, password) =>
   apiFetch('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
 export const register = (data) =>
   apiFetch('/auth/register', { method: 'POST', body: JSON.stringify(data) });
 export const logout = () => apiFetch('/auth/logout', { method: 'POST' });
-export const getProfile = () => apiFetch('/auth/profile');
+export const getMe = () => apiFetch('/auth/me');
+export const getProfile = () => apiFetch('/auth/me');
+export const updateProfile = (data) =>
+  apiFetch('/auth/profile', { method: 'PUT', body: JSON.stringify(data) });
+export const changePassword = (currentPassword, newPassword) =>
+  apiFetch('/auth/password', { method: 'PUT', body: JSON.stringify({ currentPassword, newPassword }) });
+export const forgotPassword = (email, newPassword) =>
+  apiFetch('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email, newPassword }) });
+export const addAddress = (data) =>
+  apiFetch('/auth/addresses', { method: 'POST', body: JSON.stringify(data) });
+export const deleteAddress = (id) =>
+  apiFetch(`/auth/addresses/${id}`, { method: 'DELETE' });
 
-// Orders
+// Orders & E-Wallet Payments
 export const createOrder = (data) =>
   apiFetch('/orders', { method: 'POST', body: JSON.stringify(data) });
 export const getOrders = () => apiFetch('/orders');
 export const getOrder = (orderNumber, email) =>
   apiFetch(`/orders/${orderNumber}${email ? '?email=' + email : ''}`);
+export const confirmOrderReceipt = (orderNumber) =>
+  apiFetch(`/orders/${orderNumber}/confirm-receipt`, { method: 'PATCH' });
+export const cancelOrder = (orderNumber) =>
+  apiFetch(`/orders/${orderNumber}/cancel`, { method: 'PATCH' });
+
+export const createPaymentSession = (orderNumber, paymentMethod = 'gcash') =>
+  apiFetch('/payments/create-session', { method: 'POST', body: JSON.stringify({ orderNumber, paymentMethod }) });
+export const confirmSandboxPayment = (orderNumber, paymentMethod = 'gcash', paymentId = null) =>
+  apiFetch('/payments/confirm-sandbox', { method: 'POST', body: JSON.stringify({ orderNumber, paymentMethod, paymentId }) });
+export const failSandboxPayment = (orderNumber, reason) =>
+  apiFetch('/payments/fail-sandbox', { method: 'POST', body: JSON.stringify({ orderNumber, reason }) });
+export const simulatePayment = (orderNumber) =>
+  apiFetch('/payments/simulate', { method: 'POST', body: JSON.stringify({ orderNumber }) });
 
 // Wishlist
 export const getWishlist = () => apiFetch('/wishlist');
@@ -70,7 +98,7 @@ export const addToWishlist = (productId) =>
 export const removeFromWishlist = (productId) =>
   apiFetch(`/wishlist/${productId}`, { method: 'DELETE' });
 
-// Seller Portal API
+// Seller Portal API (Role 2)
 export const registerSeller = (data) =>
   apiFetch('/auth/register-seller', { method: 'POST', body: JSON.stringify(data) });
 export const getSellerProfile = () => apiFetch('/seller/profile');
@@ -100,12 +128,78 @@ export const getSellerOrders = (params = {}) => {
   return apiFetch(`/seller/orders${qs ? '?' + qs : ''}`);
 };
 export const getSellerOrder = (id) => apiFetch(`/seller/orders/${id}`);
+export const acceptSellerOrder = (id) =>
+  apiFetch(`/seller/orders/${id}/accept`, { method: 'PATCH' });
 export const fulfillSellerOrder = (id, data) =>
   apiFetch(`/seller/orders/${id}/fulfill`, { method: 'PATCH', body: JSON.stringify(data) });
 export const cancelSellerOrder = (id, reason) =>
   apiFetch(`/seller/orders/${id}/cancel`, { method: 'PATCH', body: JSON.stringify({ reason }) });
 
-// Admin Portal API
+// Inventory Manager Portal API (Role 4)
+export const getInventoryDashboard = () => apiFetch('/inventory/dashboard');
+export const getInventoryVariants = (params = {}) => {
+  const qs = new URLSearchParams(params).toString();
+  return apiFetch(`/inventory/variants${qs ? '?' + qs : ''}`);
+};
+export const recordIncomingStock = (data) =>
+  apiFetch('/inventory/incoming', { method: 'POST', body: JSON.stringify(data) });
+export const recordOutgoingStock = (data) =>
+  apiFetch('/inventory/outgoing', { method: 'POST', body: JSON.stringify(data) });
+export const adjustInventoryVariant = (id, data) =>
+  apiFetch(`/inventory/variants/${id}/adjust`, { method: 'PATCH', body: JSON.stringify(data) });
+export const toggleVariantAvailability = (id, isActive) =>
+  apiFetch(`/inventory/variants/${id}/availability`, { method: 'PATCH', body: JSON.stringify({ isActive }) });
+export const getInventoryMovements = (params = {}) => {
+  const qs = new URLSearchParams(params).toString();
+  return apiFetch(`/inventory/movements${qs ? '?' + qs : ''}`);
+};
+export const getStockMovements = getInventoryMovements;
+export const getInventoryReport = () => apiFetch('/inventory/report');
+
+// Delivery Personnel Portal API (Role 5)
+export const getDeliveryShipments = (params = {}) => {
+  const qs = new URLSearchParams(params).toString();
+  return apiFetch(`/delivery/shipments${qs ? '?' + qs : ''}`);
+};
+export const acceptDeliveryShipment = (id) =>
+  apiFetch(`/delivery/shipments/${id}/accept`, { method: 'PATCH' });
+export const collectDeliveryShipment = (id, trackingNumber) =>
+  apiFetch(`/delivery/shipments/${id}/collect`, { method: 'PATCH', body: JSON.stringify({ trackingNumber }) });
+export const updateDeliveryShipmentStatus = (id, data) =>
+  apiFetch(`/delivery/shipments/${id}/status`, { method: 'PATCH', body: JSON.stringify(data) });
+export const failDeliveryShipment = (id, data) =>
+  apiFetch(`/delivery/shipments/${id}/fail`, { method: 'PATCH', body: JSON.stringify(data) });
+
+// Customer Support Portal API (Role 6)
+export const createSupportTicket = (data) =>
+  apiFetch('/support/tickets', { method: 'POST', body: JSON.stringify(data) });
+export const getMySupportTickets = () => apiFetch('/support/my-tickets');
+export const getSupportTickets = (params = {}) => {
+  const qs = new URLSearchParams(params).toString();
+  return apiFetch(`/support/tickets${qs ? '?' + qs : ''}`);
+};
+export const lookupSupportOrders = (q = '') =>
+  apiFetch(`/support/orders/lookup?q=${encodeURIComponent(q)}`);
+export const postSupportMessage = (ticketId, message) =>
+  apiFetch(`/support/tickets/${ticketId}/messages`, { method: 'POST', body: JSON.stringify({ message }) });
+export const replySupportTicket = postSupportMessage;
+export const updateSupportTicketStatus = (ticketId, data) =>
+  apiFetch(`/support/tickets/${ticketId}/status`, { method: 'PATCH', body: JSON.stringify(data) });
+export const executeSupportTicketAction = (ticketId, data) =>
+  apiFetch(`/support/tickets/${ticketId}/action`, { method: 'PATCH', body: JSON.stringify(data) });
+
+// Finance Officer Portal API (Role 7)
+export const getFinanceDashboard = () => apiFetch('/finance/dashboard');
+export const verifyFinancePayment = (paymentId) =>
+  apiFetch(`/finance/payments/${paymentId}/verify`, { method: 'PATCH' });
+export const createFinancePayout = (data) =>
+  apiFetch('/finance/payouts', { method: 'POST', body: JSON.stringify(data) });
+export const createSellerPayout = createFinancePayout;
+export const processFinanceRefund = (ticketId) =>
+  apiFetch(`/finance/refunds/${ticketId}/process`, { method: 'POST' });
+export const getFinanceReports = () => apiFetch('/finance/reports');
+
+// Admin Portal API (Role 3)
 export const getAdminSellers = (params = {}) => {
   const qs = new URLSearchParams(params).toString();
   return apiFetch(`/admin/sellers${qs ? '?' + qs : ''}`);
@@ -125,5 +219,14 @@ export const getAdminOrders = (params = {}) => {
 };
 export const getAdminReports = () => apiFetch('/admin/reports/sales');
 export const getAdminAuditLogs = () => apiFetch('/admin/audit-logs');
-export const simulatePayment = (orderNumber) =>
-  apiFetch('/payments/simulate', { method: 'POST', body: JSON.stringify({ orderNumber }) });
+export const getAdminUsers = (params = {}) => {
+  const qs = new URLSearchParams(params).toString();
+  return apiFetch(`/admin/users${qs ? '?' + qs : ''}`);
+};
+export const updateAdminUserRole = (id, role) =>
+  apiFetch(`/admin/users/${id}/role`, { method: 'PATCH', body: JSON.stringify({ role }) });
+export const updateAdminUserStatus = (id, accountStatus) =>
+  apiFetch(`/admin/users/${id}/status`, { method: 'PATCH', body: JSON.stringify({ accountStatus }) });
+export const getAdminPlatformConfig = () => apiFetch('/admin/platform-config');
+export const updateAdminPlatformConfig = (data) =>
+  apiFetch('/admin/platform-config', { method: 'PUT', body: JSON.stringify(data) });
