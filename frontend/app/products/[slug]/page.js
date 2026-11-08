@@ -146,8 +146,8 @@ export default function ProductDetailPage() {
       {/* Top Bar */}
       <header style={{ background: 'var(--color-surface)', borderBottom: '1px solid var(--color-border)', padding: 'var(--space-3) 0' }}>
         <div className="container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <img src="/assets/logo/stridera-logo.png" alt="STRIDERA" height="28" />
+          <Link href="/" className="nav-logo" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <img src="/assets/logo/stridera-logo.png" alt="STRIDERA" style={{ height: 36, width: 'auto', objectFit: 'contain' }} />
           </Link>
           <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
             <Link href="/shop" className="btn btn-ghost btn-sm">← Back to Shop</Link>
@@ -344,8 +344,8 @@ export default function ProductDetailPage() {
                 {selectedVariant && (
                   <p style={{ fontSize: 'var(--text-xs)', color: selectedVariant.stockQuantity <= 5 ? 'var(--color-warning)' : 'var(--color-success)', marginTop: 'var(--space-2)', fontWeight: 600 }}>
                     {selectedVariant.stockQuantity === 0 ? 'Out of stock' :
-                     selectedVariant.stockQuantity <= 5 ? `Low Stock Alert: Only ${selectedVariant.stockQuantity} pairs left!` :
-                     `In stock (${selectedVariant.stockQuantity} units available)`}
+                      selectedVariant.stockQuantity <= 5 ? `Low Stock Alert: Only ${selectedVariant.stockQuantity} pairs left!` :
+                        `In stock (${selectedVariant.stockQuantity} units available)`}
                   </p>
                 )}
               </div>
@@ -373,10 +373,10 @@ export default function ProductDetailPage() {
                 id="add-to-cart-btn"
               >
                 {adding ? 'Adding…' :
-                 !selectedColor ? 'Select Color' :
-                 !selectedSize ? 'Select Size' :
-                 !inStock ? 'Out of Stock' :
-                 'Add to Cart'}
+                  !selectedColor ? 'Select Color' :
+                    !selectedSize ? 'Select Size' :
+                      !inStock ? 'Out of Stock' :
+                        'Add to Cart'}
               </button>
               <button
                 type="button"

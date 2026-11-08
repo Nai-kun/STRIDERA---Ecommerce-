@@ -96,8 +96,8 @@ function ShopPageContent() {
       {/* Top Bar */}
       <header style={{ background: 'var(--color-surface)', borderBottom: '1px solid var(--color-border)', padding: 'var(--space-3) 0' }}>
         <div className="container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800, color: 'var(--color-text)', textDecoration: 'none' }}>
-            <img src="/assets/logo/stridera-logo.png" alt="STRIDERA" height="28" />
+          <Link href="/" className="nav-logo" style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800, color: 'var(--color-text)', textDecoration: 'none' }}>
+            <img src="/assets/logo/stridera-logo.png" alt="STRIDERA" style={{ height: 36, width: 'auto', objectFit: 'contain' }} />
           </Link>
           <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
             <Link href="/brands" className="btn btn-ghost btn-sm">Brands</Link>

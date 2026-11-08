@@ -3,6 +3,8 @@ const jwt = require('jsonwebtoken');
 const prisma = require('../lib/prisma');
 const { createError } = require('./error.middleware');
 
+const JWT_SECRET = process.env.JWT_SECRET || 'stridera-dev-secret-key-2026';
+
 const USER_SELECT = {
   id: true,
   email: true,
@@ -36,7 +38,7 @@ async function authenticate(req, res, next) {
       throw createError('Authentication required', 401);
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET);
 
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
@@ -68,7 +70,7 @@ async function optionalAuth(req, res, next) {
     }
 
     if (token) {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const decoded = jwt.verify(token, JWT_SECRET);
       const user = await prisma.user.findUnique({
         where: { id: decoded.userId },
         select: USER_SELECT,
@@ -163,7 +165,7 @@ function requireFinance(req, res, next) {
  * Generate JWT token
  */
 function generateToken(userId) {
-  return jwt.sign({ userId }, process.env.JWT_SECRET, {
+  return jwt.sign({ userId }, JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   });
 }
