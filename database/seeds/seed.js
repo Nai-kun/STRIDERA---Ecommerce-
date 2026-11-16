@@ -74,10 +74,21 @@ async function main() {
         imageUrl: '/assets/products/sneaker-men-1.jpg',
         sortOrder: 4
       }
+    }),
+    prisma.category.upsert({
+      where: { slug: 'formal' },
+      update: {},
+      create: {
+        name: 'Formal & Loafers',
+        slug: 'formal',
+        description: 'Classic leather oxfords, dress heels, and handcrafted loafers for formal and smart-casual occasions.',
+        imageUrl: '/assets/products/formal-men-1.jpg',
+        sortOrder: 5
+      }
     })
   ]);
 
-  const [running, lifestyle, basketball, training] = categories;
+  const [running, lifestyle, basketball, training, formal] = categories;
   console.log('✅ Categories created');
 
   // ────────────────────────────────────────────────
@@ -575,6 +586,112 @@ async function main() {
           color: 'Gray/Navy',
           colorHex: '#9E9E9E',
           stockQuantity: 6
+        }))
+      }
+    }
+  });
+
+  // New Formal & Loafers Products (using updated product_images/pcs assets)
+  await prisma.product.upsert({
+    where: { sku: 'STR-FRM-M-001' },
+    update: { sellerId: seller.id, brandId: brandApex.id, categoryId: formal.id },
+    create: {
+      categoryId: formal.id,
+      sellerId: seller.id,
+      brandId: brandApex.id,
+      name: 'Stridera Executive Oxford',
+      slug: 'stridera-executive-oxford',
+      sku: 'STR-FRM-M-001',
+      description: 'Hand-finished full-grain leather oxford crafted for boardrooms, weddings, and formal occasions with cushioned arch support.',
+      features: 'Full-grain leather upper • Goodyear-welted sole • Breathable calfskin lining • Cushioned insole',
+      basePriceCentavos: 699500,
+      compareAtPriceCentavos: 799500,
+      audience: 'MEN',
+      shoeType: 'FORMAL',
+      isFeatured: true,
+      images: {
+        create: [
+          { url: '/assets/products/formal-men-1.jpg', altText: 'Stridera Executive Oxford Front', sortOrder: 0, isPrimary: true },
+          { url: '/assets/products/formal-men-2.jpg', altText: 'Stridera Executive Oxford Side', sortOrder: 1, isPrimary: false },
+          { url: '/assets/products/formal-men-3.jpg', altText: 'Stridera Executive Oxford Detail', sortOrder: 2, isPrimary: false },
+          { url: '/assets/products/formal-men-4.jpg', altText: 'Stridera Executive Oxford Pair', sortOrder: 3, isPrimary: false },
+          { url: '/assets/products/formal-men-5.jpg', altText: 'Stridera Executive Oxford Sole', sortOrder: 4, isPrimary: false }
+        ]
+      },
+      variants: {
+        create: ['7', '8', '9', '10', '11'].flatMap(size => [
+          { variantSku: `STR-FRM-M-001-${size}-BLK`, size, color: 'Classic Black', colorHex: '#111827', stockQuantity: 8 },
+          { variantSku: `STR-FRM-M-001-${size}-BRN`, size, color: 'Mahogany Brown', colorHex: '#5C3A21', stockQuantity: 6 }
+        ])
+      }
+    }
+  });
+
+  await prisma.product.upsert({
+    where: { sku: 'STR-FRM-W-001' },
+    update: { sellerId: seller2.id, brandId: brandOfficial.id, categoryId: formal.id },
+    create: {
+      categoryId: formal.id,
+      sellerId: seller2.id,
+      brandId: brandOfficial.id,
+      name: 'Stridera Elegance Dress Pump',
+      slug: 'stridera-elegance-dress-pump',
+      sku: 'STR-FRM-W-001',
+      description: 'Refined women\'s formal dress shoe combining timeless silhouette with memory-foam comfort for all-day wear.',
+      features: 'Supple leather finish • Memory-foam footbed • Non-slip rubberized sole • Ergonomic heel',
+      basePriceCentavos: 549500,
+      compareAtPriceCentavos: 629500,
+      audience: 'WOMEN',
+      shoeType: 'FORMAL',
+      isFeatured: true,
+      images: {
+        create: [
+          { url: '/assets/products/formal-women-1.jpg', altText: 'Stridera Elegance Dress Pump Primary', sortOrder: 0, isPrimary: true },
+          { url: '/assets/products/formal-women-2.jpg', altText: 'Stridera Elegance Dress Pump Side', sortOrder: 1, isPrimary: false },
+          { url: '/assets/products/formal-women-3.jpg', altText: 'Stridera Elegance Dress Pump Angle', sortOrder: 2, isPrimary: false },
+          { url: '/assets/products/formal-women-4.jpg', altText: 'Stridera Elegance Dress Pump Pair', sortOrder: 3, isPrimary: false },
+          { url: '/assets/products/formal-women-5.jpg', altText: 'Stridera Elegance Dress Pump Detail', sortOrder: 4, isPrimary: false }
+        ]
+      },
+      variants: {
+        create: ['5', '6', '7', '8', '9'].flatMap(size => [
+          { variantSku: `STR-FRM-W-001-${size}-BLK`, size, color: 'Noir Black', colorHex: '#18181B', stockQuantity: 7 },
+          { variantSku: `STR-FRM-W-001-${size}-NDE`, size, color: 'Champagne Nude', colorHex: '#D6B89C', stockQuantity: 5 }
+        ])
+      }
+    }
+  });
+
+  await prisma.product.upsert({
+    where: { sku: 'STR-LOF-M-001' },
+    update: { sellerId: seller2.id, brandId: brandOfficial.id, categoryId: formal.id },
+    create: {
+      categoryId: formal.id,
+      sellerId: seller2.id,
+      brandId: brandOfficial.id,
+      name: 'Stridera Heritage Penny Loafer',
+      slug: 'stridera-heritage-penny-loafer',
+      sku: 'STR-LOF-M-001',
+      description: 'Slip-on penny loafer crafted from burnished leather for effortless smart-casual versatility.',
+      features: 'Hand-stitched moccasin apron • Cushioned leather footbed • Flexible outsole',
+      basePriceCentavos: 529500,
+      audience: 'MEN',
+      shoeType: 'LOAFERS',
+      isFeatured: true,
+      images: {
+        create: [
+          { url: '/assets/products/loafer-men-1.jpg', altText: 'Stridera Heritage Penny Loafer Primary', sortOrder: 0, isPrimary: true },
+          { url: '/assets/products/loafer-men-2.jpg', altText: 'Stridera Heritage Penny Loafer Side', sortOrder: 1, isPrimary: false },
+          { url: '/assets/products/loafer-men-3.jpg', altText: 'Stridera Heritage Penny Loafer Detail', sortOrder: 2, isPrimary: false }
+        ]
+      },
+      variants: {
+        create: ['7', '8', '9', '10', '11'].map(size => ({
+          variantSku: `STR-LOF-M-001-${size}-ESP`,
+          size,
+          color: 'Espresso Brown',
+          colorHex: '#4A2C18',
+          stockQuantity: 9
         }))
       }
     }

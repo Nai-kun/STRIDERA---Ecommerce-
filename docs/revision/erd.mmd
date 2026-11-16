@@ -1,0 +1,102 @@
+erDiagram
+    USERS {
+        uuid id PK
+        string email UK
+        string password_hash
+        string session_token_hash
+        timestamp session_expires_at
+        enum role "CUSTOMER | SELLER | ADMIN | beyond-spec"
+        enum account_status "ACTIVE | DEACTIVATED | SUSPENDED"
+        enum seller_status "PENDING | APPROVED | REJECTED | SUSPENDED"
+        string store_name
+        timestamp last_login_at
+        timestamp last_seen_at
+    }
+    PRODUCTS {
+        uuid id PK
+        uuid seller_id FK
+        uuid category_id FK
+        uuid brand_id FK
+        string name
+        string sku UK
+        int base_price_centavos
+        enum status "ACTIVE | DRAFT | ARCHIVED"
+        boolean is_active
+    }
+    PRODUCT_VARIANTS {
+        uuid id PK
+        uuid product_id FK
+        string variant_sku UK
+        string size
+        string color
+        int stock_quantity
+        boolean is_active
+    }
+    PRODUCT_IMAGES {
+        uuid id PK
+        uuid product_id FK
+        string url
+        boolean is_primary
+    }
+    ORDERS {
+        uuid id PK
+        string order_number UK
+        uuid user_id FK
+        int grand_total_centavos
+        enum order_status
+        enum payment_status
+        boolean stock_decremented
+        timestamp created_at
+    }
+    ORDER_ITEMS {
+        uuid id PK
+        uuid order_id FK
+        uuid seller_order_id FK
+        uuid product_variant_id FK
+        int quantity
+        int unit_price_centavos
+        enum fulfillment_status "PENDING | SHIPPED | CANCELLED"
+        timestamp shipped_at
+        boolean stock_conflict
+    }
+    PAYMENTS {
+        uuid id PK
+        uuid order_id FK
+        string provider
+        string provider_payment_id
+        string idempotency_key UK
+        enum status
+        boolean is_demo
+    }
+    SYSTEM_SETTINGS {
+        string key PK
+        text encrypted_value
+        boolean is_secret
+        uuid updated_by FK
+    }
+    WEBHOOK_EVENTS {
+        uuid id PK
+        string provider
+        string event_id UK
+        boolean signature_valid
+        string status
+        jsonb redacted_payload
+        timestamp received_at
+    }
+    AUDIT_LOGS {
+        uuid id PK
+        uuid user_id FK
+        string action
+        string entity_type
+        string entity_id
+        timestamp created_at
+    }
+
+    USERS ||--o{ PRODUCTS : owns
+    USERS ||--o{ ORDERS : places
+    PRODUCTS ||--o{ PRODUCT_VARIANTS : has
+    PRODUCTS ||--o{ PRODUCT_IMAGES : has
+    ORDERS ||--|{ ORDER_ITEMS : contains
+    ORDERS ||--o{ PAYMENTS : paid_via
+    PRODUCT_VARIANTS ||--o{ ORDER_ITEMS : ordered_in
+    USERS ||--o{ AUDIT_LOGS : triggers

@@ -4,13 +4,15 @@ const router = express.Router();
 const prisma = require('../lib/prisma');
 const { authenticate, isAdmin } = require('../middleware/auth.middleware');
 const { createError } = require('../middleware/error.middleware');
+const { finalizePayment } = require('../lib/paymentFinalizer');
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
 
 const PAYMONGO_SECRET_KEY = process.env.PAYMONGO_SECRET_KEY;
 const PAYMONGO_WEBHOOK_SECRET = process.env.PAYMONGO_WEBHOOK_SECRET;
 const PAYMONGO_API_URL = 'https://api.paymongo.com/v1';
-const DEMO_MODE = process.env.DEMO_MODE === 'true';
+const isDemoFallbackEnabled = () =>
+  process.env.DEMO_FALLBACK_ENABLED !== 'false' && process.env.DEMO_MODE === 'true';
 
 /**
  * Helper: Make a PayMongo API request
@@ -127,7 +129,7 @@ router.post('/create-session', authenticate, async (req, res, next) => {
           amountCentavos: order.grandTotalCentavos,
           amountFormatted: `₱${(order.grandTotalCentavos / 100).toFixed(2)}`,
           status: 'PENDING',
-          demoModeAvailable: DEMO_MODE
+          demoModeAvailable: isDemoFallbackEnabled()
         }
       });
     }
@@ -230,74 +232,27 @@ router.post('/confirm-sandbox', authenticate, async (req, res, next) => {
       ? String(rawMethod || order.paymentMethod || 'gcash').toLowerCase()
       : 'gcash';
 
-    const refNumber = `${paymentMethod.toUpperCase()}-PAID-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
-
-    await prisma.$transaction(async (tx) => {
-      let existing = paymentId
-        ? await tx.payment.findUnique({ where: { id: paymentId } })
-        : await tx.payment.findFirst({ where: { orderId: order.id, status: 'PENDING' } });
-
-      if (existing) {
-        await tx.payment.update({
-          where: { id: existing.id },
-          data: {
-            status: 'PAID',
-            paymentMethod,
-            providerPaymentId: existing.providerPaymentId || refNumber,
-            verifiedAt: new Date()
-          }
-        });
-      } else {
-        await tx.payment.create({
-          data: {
-            orderId: order.id,
-            provider: `${paymentMethod}_sandbox`,
-            paymentMethod,
-            providerPaymentId: refNumber,
-            idempotencyKey: uuidv4(),
-            amountCentavos: order.grandTotalCentavos,
-            currency: 'PHP',
-            status: 'PAID',
-            isDemo: true,
-            verifiedAt: new Date()
-          }
-        });
-      }
-
-      await tx.order.update({
-        where: { id: order.id },
-        data: {
-          paymentStatus: 'PAID',
-          orderStatus: 'CONFIRMED',
-          paymentMethod
-        }
-      });
-
-      await tx.sellerOrder.updateMany({
-        where: { orderId: order.id, status: 'PENDING' },
-        data: { status: 'PAID' }
-      });
-
-      await tx.auditLog.create({
-        data: {
-          userId: req.user.id,
-          action: 'EWALLET_PAYMENT_CONFIRMED',
-          entityType: 'Order',
-          entityId: order.id,
-          newValues: { orderNumber, paymentMethod, amountCentavos: order.grandTotalCentavos },
-          ipAddress: req.ip
-        }
-      });
+    const result = await finalizePayment({
+      orderId: order.id,
+      provider: `${paymentMethod}_sandbox`,
+      paymentMethod,
+      actorId: req.user.id,
+      isDemo: true,
+      paymentId,
+      ipAddress: req.ip
     });
 
     res.json({
       success: true,
-      message: `E-Wallet (${paymentMethod.toUpperCase()}) payment verified! Order is now CONFIRMED.`,
+      message: result.alreadyPaid
+        ? 'Payment already verified (idempotent)'
+        : `E-Wallet (${paymentMethod.toUpperCase()}) payment verified! Order is now PAID.`,
       data: {
         orderNumber: order.orderNumber,
         paymentMethod,
         paymentStatus: 'PAID',
-        orderStatus: 'CONFIRMED'
+        orderStatus: 'CONFIRMED',
+        stockConflicts: result.stockConflicts || []
       }
     });
   } catch (err) {
@@ -363,39 +318,102 @@ router.post('/fail-sandbox', authenticate, async (req, res, next) => {
   }
 });
 
-// POST /api/payments/webhook — PayMongo webhook handler (raw body for signature verification, FR-4.4 & FR-4.10)
+// POST /api/payments/webhook — PayMongo webhook handler (raw body for signature verification, FR-4.4, FR-4.10, D7, D9)
 router.post('/webhook', async (req, res, next) => {
+  let eventId = `evt_${uuidv4()}`;
+  let eventType = 'unknown';
+  let signatureValid = false;
+
   try {
-    const rawBody = req.body;
+    const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.from(JSON.stringify(req.body || {}));
+    let parsedEvent = {};
+    try {
+      parsedEvent = JSON.parse(rawBody.toString());
+      eventId = parsedEvent.data?.id || eventId;
+      eventType = parsedEvent.data?.attributes?.type || 'unknown';
+    } catch {
+      // keep fallback eventId
+    }
+
+    const redactPayload = (ev) => ({
+      id: ev?.data?.id || null,
+      type: ev?.data?.attributes?.type || null,
+      orderNumber: ev?.data?.attributes?.data?.attributes?.metadata?.order_number || null
+    });
 
     if (PAYMONGO_WEBHOOK_SECRET) {
       const signature = req.headers['paymongo-signature'];
       if (!signature) {
+        await prisma.webhookEvent.upsert({
+          where: { eventId },
+          update: {},
+          create: {
+            provider: 'paymongo',
+            eventId,
+            eventType,
+            signatureValid: false,
+            status: 'REJECTED',
+            redactedPayload: redactPayload(parsedEvent),
+            error: 'Missing signature header'
+          }
+        }).catch(() => {});
         return res.status(401).json({ success: false, message: 'Missing signature' });
       }
 
-      const parts = signature.split(',').reduce((acc, part) => {
+      const parts = String(signature).split(',').reduce((acc, part) => {
         const [key, val] = part.split('=');
         acc[key] = val;
         return acc;
       }, {});
 
       const timestamp = parts.t;
-      const testSig = parts.te;
-      const liveSig = parts.li;
-
+      const sigToCheck = parts.te || parts.li || '';
       const payload = `${timestamp}.${rawBody.toString()}`;
       const expectedSig = crypto.createHmac('sha256', PAYMONGO_WEBHOOK_SECRET).update(payload).digest('hex');
 
-      const sigToCheck = testSig || liveSig;
-      if (sigToCheck !== expectedSig) {
+      const sigBuf = Buffer.from(sigToCheck);
+      const expBuf = Buffer.from(expectedSig);
+      signatureValid = sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf);
+
+      if (!signatureValid) {
+        await prisma.webhookEvent.upsert({
+          where: { eventId },
+          update: {},
+          create: {
+            provider: 'paymongo',
+            eventId,
+            eventType,
+            signatureValid: false,
+            status: 'REJECTED',
+            redactedPayload: redactPayload(parsedEvent),
+            error: 'Invalid signature'
+          }
+        }).catch(() => {});
         return res.status(401).json({ success: false, message: 'Invalid signature' });
       }
+    } else {
+      signatureValid = true;
     }
 
-    const event = JSON.parse(rawBody.toString());
-    const eventType = event.data?.attributes?.type;
-    const eventData = event.data?.attributes?.data;
+    const existingEvent = await prisma.webhookEvent.findUnique({ where: { eventId } });
+    if (existingEvent && existingEvent.status === 'PROCESSED') {
+      return res.json({ success: true, message: 'Webhook already processed (idempotent)' });
+    }
+
+    await prisma.webhookEvent.upsert({
+      where: { eventId },
+      update: { signatureValid, status: 'PROCESSING' },
+      create: {
+        provider: 'paymongo',
+        eventId,
+        eventType,
+        signatureValid,
+        status: 'PROCESSING',
+        redactedPayload: redactPayload(parsedEvent)
+      }
+    });
+
+    const eventData = parsedEvent.data?.attributes?.data;
 
     if (eventType === 'checkout_session.payment.paid') {
       const metadata = eventData?.attributes?.metadata;
@@ -403,126 +421,106 @@ router.post('/webhook', async (req, res, next) => {
       const idempotencyKey = metadata?.idempotency_key;
 
       if (!orderNumber) {
+        await prisma.webhookEvent.update({
+          where: { eventId },
+          data: { status: 'FAILED', error: 'Missing order_number in metadata', processedAt: new Date() }
+        });
         return res.status(400).json({ success: false, message: 'Missing order number in metadata' });
       }
 
-      const payment = await prisma.payment.findFirst({
-        where: { idempotencyKey, status: 'PENDING' }
-      });
+      const payment = idempotencyKey
+        ? await prisma.payment.findFirst({ where: { idempotencyKey } })
+        : null;
+      const order = payment
+        ? await prisma.order.findUnique({ where: { id: payment.orderId } })
+        : await prisma.order.findUnique({ where: { orderNumber } });
 
-      if (!payment) {
-        return res.json({ success: true, message: 'Already processed or not found' });
+      if (!order) {
+        await prisma.webhookEvent.update({
+          where: { eventId },
+          data: { status: 'FAILED', error: 'Order not found', processedAt: new Date() }
+        });
+        return res.json({ success: true, message: 'Order not found' });
       }
 
-      await prisma.$transaction(async (tx) => {
-        await tx.payment.update({
-          where: { id: payment.id },
-          data: {
-            status: 'PAID',
-            providerPaymentId: eventData?.id || payment.providerPaymentId,
-            webhookEventId: event.data?.id,
-            verifiedAt: new Date()
-          }
-        });
-
-        await tx.order.update({
-          where: { id: payment.orderId },
-          data: {
-            paymentStatus: 'PAID',
-            orderStatus: 'CONFIRMED'
-          }
-        });
-
-        await tx.sellerOrder.updateMany({
-          where: { orderId: payment.orderId, status: 'PENDING' },
-          data: { status: 'PAID' }
-        });
+      await finalizePayment({
+        orderId: order.id,
+        provider: 'paymongo',
+        paymentMethod: order.paymentMethod || 'gcash',
+        referenceNumber: eventData?.id || payment?.providerPaymentId,
+        isDemo: false,
+        webhookEventId: eventId,
+        paymentId: payment?.id || null,
+        ipAddress: req.ip
       });
     }
 
+    await prisma.webhookEvent.update({
+      where: { eventId },
+      data: { status: 'PROCESSED', processedAt: new Date() }
+    });
+
     res.json({ success: true });
   } catch (err) {
+    await prisma.webhookEvent.update({
+      where: { eventId },
+      data: { status: 'FAILED', error: err.message, processedAt: new Date() }
+    }).catch(() => {});
     next(err);
   }
 });
 
-// POST /api/payments/simulate — Demo Safety Fallback (admin only, DEMO_MODE only)
-router.post('/simulate', authenticate, isAdmin, async (req, res, next) => {
+// POST /api/payments/simulate — Demo Safety Fallback (Order Owner or Admin, DEMO_FALLBACK_ENABLED + sandboxMode only, D13)
+router.post('/simulate', authenticate, async (req, res, next) => {
   try {
-    if (!DEMO_MODE) {
+    if (!isDemoFallbackEnabled()) {
       return res.status(403).json({
         success: false,
-        message: 'Demo mode is disabled. Set DEMO_MODE=true to enable payment simulation.'
+        message: 'Demo fallback is disabled. Set DEMO_FALLBACK_ENABLED=true and DEMO_MODE=true to enable payment simulation.'
+      });
+    }
+
+    const platformCfg = await prisma.platformConfig.findUnique({ where: { id: 'default' } });
+    if (platformCfg && platformCfg.sandboxMode === false) {
+      return res.status(403).json({
+        success: false,
+        message: 'Payment simulation is only allowed in sandbox mode.'
       });
     }
 
     const { orderNumber } = req.body;
-
     if (!orderNumber) {
       return res.status(400).json({ success: false, message: 'Order number required' });
     }
 
     const order = await prisma.order.findUnique({ where: { orderNumber } });
-
     if (!order) {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    if (order.paymentStatus === 'PAID') {
-      return res.status(400).json({ success: false, message: 'Order is already paid' });
+    if (order.userId !== req.user.id && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
-    const idempotencyKey = uuidv4();
-
-    await prisma.$transaction(async (tx) => {
-      await tx.payment.create({
-        data: {
-          orderId: order.id,
-          provider: 'demo_simulation',
-          paymentMethod: order.paymentMethod || 'gcash',
-          providerPaymentId: `DEMO-${uuidv4().slice(0, 8)}`,
-          idempotencyKey,
-          amountCentavos: order.grandTotalCentavos,
-          currency: 'PHP',
-          status: 'PAID',
-          isDemo: true,
-          verifiedAt: new Date()
-        }
-      });
-
-      await tx.order.update({
-        where: { id: order.id },
-        data: {
-          paymentStatus: 'PAID',
-          orderStatus: 'CONFIRMED'
-        }
-      });
-
-      await tx.sellerOrder.updateMany({
-        where: { orderId: order.id, status: 'PENDING' },
-        data: { status: 'PAID' }
-      });
-
-      await tx.auditLog.create({
-        data: {
-          userId: req.user.id,
-          action: 'SIMULATE_PAYMENT',
-          entityType: 'Order',
-          entityId: order.id,
-          newValues: { orderNumber, amount: order.grandTotalCentavos, simulatedBy: req.user.email },
-          ipAddress: req.ip
-        }
-      });
+    const result = await finalizePayment({
+      orderId: order.id,
+      provider: 'SIMULATED',
+      paymentMethod: order.paymentMethod || 'gcash',
+      referenceNumber: `SIM-${uuidv4().slice(0, 8).toUpperCase()}`,
+      actorId: req.user.id,
+      isDemo: true,
+      ipAddress: req.ip
     });
 
     res.json({
       success: true,
-      message: '⚠️ SIMULATED payment — demo mode only',
+      message: result.alreadyPaid ? 'Order already paid (idempotent)' : '⚠️ SIMULATED payment — demo mode only',
       data: {
         orderNumber: order.orderNumber,
         paymentStatus: 'PAID',
         orderStatus: 'CONFIRMED',
-        isDemo: true
+        isDemo: true,
+        stockConflicts: result.stockConflicts || []
       }
     });
   } catch (err) {

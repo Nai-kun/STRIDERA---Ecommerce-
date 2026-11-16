@@ -4,6 +4,7 @@ const router = express.Router();
 const prisma = require('../lib/prisma');
 const { authenticate, isAdmin } = require('../middleware/auth.middleware');
 const { createError } = require('../middleware/error.middleware');
+const { encryptSetting, decryptSetting, maskSecret: maskApiSecret, assertSandboxKey } = require('../lib/cryptoSettings');
 const { body, param, query, validationResult } = require('express-validator');
 
 // All admin routes require authentication + admin role
@@ -80,7 +81,7 @@ router.post('/products', [
   body('categoryId').isUUID(),
   body('basePriceCentavos').isInt({ min: 0 }),
   body('audience').isIn(['MEN', 'WOMEN', 'UNISEX']),
-  body('shoeType').isIn(['RUNNING', 'LIFESTYLE', 'BASKETBALL', 'TRAINING'])
+  body('shoeType').isIn(['RUNNING', 'LIFESTYLE', 'BASKETBALL', 'TRAINING', 'CASUAL', 'BOOTS', 'FORMAL', 'LOAFERS'])
 ], async (req, res, next) => {
   try {
     const errors = validationResult(req);
@@ -934,7 +935,24 @@ router.patch('/users/:id/role', [
     const user = await prisma.user.findUnique({ where: { id: req.params.id } });
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
-    const updateData = { role };
+    // D6 Safeguards: prevent self-lockout and demoting last remaining ADMIN
+    if (user.id === req.user.id && role !== 'ADMIN') {
+      return res.status(400).json({ success: false, message: 'Cannot demote your own administrator account (self-lockout prevented).' });
+    }
+    if (user.role === 'ADMIN' && role !== 'ADMIN') {
+      const adminCount = await prisma.user.count({
+        where: { role: 'ADMIN', isActive: true, accountStatus: 'ACTIVE' }
+      });
+      if (adminCount <= 1) {
+        return res.status(400).json({ success: false, message: 'Cannot demote the last remaining active administrator.' });
+      }
+    }
+
+    const updateData = {
+      role,
+      sessionTokenHash: null, // D4: invalidate session on role change
+      sessionExpiresAt: null
+    };
     if (role === 'SELLER' && !user.sellerStatus) {
       updateData.sellerStatus = 'APPROVED';
     }
@@ -979,10 +997,27 @@ router.patch('/users/:id/status', [
     const user = await prisma.user.findUnique({ where: { id: req.params.id } });
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
+    // D6 Safeguards: prevent self-lockout and suspending last remaining ADMIN
+    if (user.id === req.user.id && accountStatus !== 'ACTIVE') {
+      return res.status(400).json({ success: false, message: 'Cannot suspend or deactivate your own administrator account.' });
+    }
+    if (user.role === 'ADMIN' && accountStatus !== 'ACTIVE') {
+      const adminCount = await prisma.user.count({
+        where: { role: 'ADMIN', isActive: true, accountStatus: 'ACTIVE' }
+      });
+      if (adminCount <= 1) {
+        return res.status(400).json({ success: false, message: 'Cannot suspend or deactivate the last remaining active administrator.' });
+      }
+    }
+
     const isActive = accountStatus === 'ACTIVE';
     const updated = await prisma.user.update({
       where: { id: user.id },
-      data: { accountStatus, isActive },
+      data: {
+        accountStatus,
+        isActive,
+        ...(accountStatus !== 'ACTIVE' ? { sessionTokenHash: null, sessionExpiresAt: null } : {})
+      },
       select: { id: true, email: true, firstName: true, lastName: true, role: true, accountStatus: true, isActive: true }
     });
 
@@ -1079,6 +1114,324 @@ router.put('/platform-config', async (req, res, next) => {
       success: true,
       message: 'Platform configuration settings updated',
       data: updated
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ────────────────────────────────────────────────
+//  PLATFORM-WIDE SELLER ANALYTICS (REV-08, D3, D8, D13)
+// ────────────────────────────────────────────────
+
+// GET /api/admin/analytics?period=30d
+router.get('/analytics', async (req, res, next) => {
+  try {
+    const period = ['7d', '30d', '90d', 'all'].includes(req.query.period) ? req.query.period : '30d';
+    const now = Date.now();
+    let periodStart = null;
+    if (period === '7d') periodStart = new Date(now - 7 * 24 * 60 * 60 * 1000);
+    else if (period === '30d') periodStart = new Date(now - 30 * 24 * 60 * 60 * 1000);
+    else if (period === '90d') periodStart = new Date(now - 90 * 24 * 60 * 60 * 1000);
+
+    const ONLINE_WINDOW_MS = 10 * 60 * 1000; // 10 minutes per D3
+    const LOW_STOCK_THRESHOLD = 5;
+
+    const [sellers, paidItems] = await Promise.all([
+      prisma.user.findMany({
+        where: { role: 'SELLER', sellerStatus: 'APPROVED' },
+        select: {
+          id: true,
+          email: true,
+          storeName: true,
+          accountStatus: true,
+          lastSeenAt: true,
+          lastLoginAt: true,
+          products: {
+            select: {
+              id: true,
+              isActive: true,
+              status: true,
+              variants: {
+                where: { isActive: true },
+                select: { stockQuantity: true }
+              }
+            }
+          },
+          sellerOrders: {
+            where: periodStart ? { createdAt: { gte: periodStart } } : {},
+            select: { id: true, status: true }
+          }
+        },
+        orderBy: { storeName: 'asc' }
+      }),
+      prisma.orderItem.findMany({
+        where: {
+          fulfillmentStatus: { not: 'CANCELLED' },
+          order: {
+            paymentStatus: 'PAID',
+            orderStatus: { not: 'CANCELLED' },
+            ...(periodStart ? { createdAt: { gte: periodStart } } : {})
+          }
+        },
+        include: {
+          productVariant: { select: { product: { select: { sellerId: true } } } },
+          order: {
+            select: {
+              id: true,
+              payments: { where: { status: 'PAID' }, select: { provider: true, isDemo: true }, take: 1 }
+            }
+          }
+        }
+      })
+    ]);
+
+    const sellerStats = new Map();
+    for (const s of sellers) {
+      const activeProducts = s.products.filter(p => p.isActive && p.status !== 'ARCHIVED');
+      const lowStockItems = activeProducts.reduce((cnt, p) => {
+        return cnt + p.variants.filter(v => v.stockQuantity <= LOW_STOCK_THRESHOLD).length;
+      }, 0);
+      const totalSlices = s.sellerOrders.filter(so => so.status !== 'CANCELLED').length;
+      const fulfilledSlices = s.sellerOrders.filter(so => ['SHIPPED', 'DELIVERED'].includes(so.status)).length;
+      const fulfillmentRate = totalSlices > 0 ? Math.round((fulfilledSlices / totalSlices) * 100) : 0;
+      const onlineNow = Boolean(s.lastSeenAt && (now - new Date(s.lastSeenAt).getTime()) <= ONLINE_WINDOW_MS);
+
+      sellerStats.set(s.id, {
+        sellerId: s.id,
+        storeName: s.storeName || s.email,
+        email: s.email,
+        accountStatus: s.accountStatus,
+        lastSeenAt: s.lastSeenAt,
+        onlineNow,
+        activeListings: activeProducts.length,
+        lowStockItems,
+        fulfillmentRate,
+        revenueCentavos: 0,
+        simulatedRevenueCentavos: 0,
+        gatewayRevenueCentavos: 0,
+        unitsSold: 0,
+        orderIds: new Set()
+      });
+    }
+
+    let platformRevenueCentavos = 0;
+    let simulatedRevenueCentavos = 0;
+    let gatewayRevenueCentavos = 0;
+    let totalUnitsSold = 0;
+    const allOrderIds = new Set();
+
+    for (const item of paidItems) {
+      const sellerId = item.productVariant?.product?.sellerId;
+      const lineRev = item.unitPriceCentavos * item.quantity;
+      const payment = item.order?.payments?.[0];
+      const isSim = payment?.provider === 'SIMULATED' || payment?.provider === 'demo_simulation' || payment?.isDemo === true;
+
+      platformRevenueCentavos += lineRev;
+      if (isSim) simulatedRevenueCentavos += lineRev;
+      else gatewayRevenueCentavos += lineRev;
+
+      totalUnitsSold += item.quantity;
+      allOrderIds.add(item.orderId);
+
+      if (sellerId && sellerStats.has(sellerId)) {
+        const st = sellerStats.get(sellerId);
+        st.revenueCentavos += lineRev;
+        if (isSim) st.simulatedRevenueCentavos += lineRev;
+        else st.gatewayRevenueCentavos += lineRev;
+        st.unitsSold += item.quantity;
+        st.orderIds.add(item.orderId);
+      }
+    }
+
+    const sellerRows = [...sellerStats.values()]
+      .map(s => ({
+        sellerId: s.sellerId,
+        storeName: s.storeName,
+        email: s.email,
+        accountStatus: s.accountStatus,
+        lastSeenAt: s.lastSeenAt,
+        onlineNow: s.onlineNow,
+        activeListings: s.activeListings,
+        lowStockItems: s.lowStockItems,
+        fulfillmentRate: s.fulfillmentRate,
+        revenueCentavos: s.revenueCentavos,
+        revenueFormatted: `₱${(s.revenueCentavos / 100).toFixed(2)}`,
+        simulatedRevenueCentavos: s.simulatedRevenueCentavos,
+        gatewayRevenueCentavos: s.gatewayRevenueCentavos,
+        unitsSold: s.unitsSold,
+        orderCount: s.orderIds.size
+      }))
+      .sort((a, b) => b.revenueCentavos - a.revenueCentavos);
+
+    res.json({
+      success: true,
+      data: {
+        period,
+        timezone: 'Asia/Manila',
+        totals: {
+          revenueCentavos: platformRevenueCentavos,
+          revenueFormatted: `₱${(platformRevenueCentavos / 100).toFixed(2)}`,
+          simulatedRevenueCentavos,
+          gatewayRevenueCentavos,
+          unitsSold: totalUnitsSold,
+          orderCount: allOrderIds.size,
+          approvedSellers: sellers.length,
+          onlineSellers: sellerRows.filter(s => s.onlineNow).length
+        },
+        sellers: sellerRows
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ────────────────────────────────────────────────
+//  ENCRYPTED API SETTINGS, WEBHOOK MONITOR & HEALTH (REV-10, D7)
+// ────────────────────────────────────────────────
+
+const API_SETTING_KEYS = ['PAYMONGO_SECRET_KEY', 'PAYMONGO_PUBLIC_KEY', 'PAYMONGO_WEBHOOK_SECRET'];
+
+// GET /api/admin/api-settings — Return masked API keys (never full secrets)
+router.get('/api-settings', async (req, res, next) => {
+  try {
+    const rows = await prisma.systemSetting.findMany({
+      where: { key: { in: API_SETTING_KEYS } }
+    });
+    const map = new Map(rows.map(r => [r.key, r]));
+
+    const settings = {};
+    for (const k of API_SETTING_KEYS) {
+      const row = map.get(k);
+      let raw = '';
+      if (row) {
+        try { raw = decryptSetting(row.encryptedValue); } catch { raw = ''; }
+      } else if (process.env[k]) {
+        raw = process.env[k];
+      }
+      settings[k] = {
+        configured: Boolean(raw),
+        masked: maskApiSecret(raw),
+        source: row ? 'database (encrypted)' : (process.env[k] ? 'environment' : 'unset'),
+        updatedAt: row?.updatedAt || null
+      };
+    }
+
+    res.json({
+      success: true,
+      data: {
+        sandboxOnly: true,
+        settings
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /api/admin/api-settings — Store encrypted sandbox API keys (reject live keys)
+router.put('/api-settings', async (req, res, next) => {
+  try {
+    const updates = [];
+    for (const k of API_SETTING_KEYS) {
+      if (req.body[k] !== undefined && String(req.body[k]).trim() !== '') {
+        const val = String(req.body[k]).trim();
+        assertSandboxKey(val, k);
+        updates.push({ key: k, encryptedValue: encryptSetting(val) });
+      }
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ success: false, message: 'Provide at least one sandbox key to update.' });
+    }
+
+    for (const u of updates) {
+      await prisma.systemSetting.upsert({
+        where: { key: u.key },
+        update: { encryptedValue: u.encryptedValue, updatedBy: req.user.id },
+        create: { key: u.key, encryptedValue: u.encryptedValue, isSecret: true, updatedBy: req.user.id }
+      });
+    }
+
+    await prisma.auditLog.create({
+      data: {
+        userId: req.user.id,
+        action: 'ADMIN_UPDATE_API_SETTINGS',
+        entityType: 'SystemSetting',
+        entityId: 'sandbox_keys',
+        newValues: { updatedKeys: updates.map(u => u.key) }, // Never log secret values
+        ipAddress: req.ip
+      }
+    });
+
+    res.json({ success: true, message: 'Sandbox API settings encrypted and saved.' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/admin/webhooks — Webhook Events Monitor (D7)
+router.get('/webhooks', async (req, res, next) => {
+  try {
+    const events = await prisma.webhookEvent.findMany({
+      orderBy: { receivedAt: 'desc' },
+      take: 50
+    });
+    res.json({ success: true, data: events });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/admin/health — Real System Health & Diagnostics (D7)
+router.get('/health', async (req, res, next) => {
+  try {
+    let dbReachable = false;
+    let dbLatencyMs = null;
+    try {
+      const t0 = Date.now();
+      await prisma.$queryRaw`SELECT 1`;
+      dbLatencyMs = Date.now() - t0;
+      dbReachable = true;
+    } catch {
+      dbReachable = false;
+    }
+
+    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const [lastWebhook, failedWebhooks24h, recentErrors, platformCfg] = await Promise.all([
+      prisma.webhookEvent.findFirst({ orderBy: { receivedAt: 'desc' } }),
+      prisma.webhookEvent.count({
+        where: {
+          receivedAt: { gte: since24h },
+          OR: [{ signatureValid: false }, { status: { in: ['FAILED', 'REJECTED'] } }]
+        }
+      }),
+      prisma.webhookEvent.findMany({
+        where: { status: { in: ['FAILED', 'REJECTED'] } },
+        orderBy: { receivedAt: 'desc' },
+        take: 10
+      }),
+      prisma.platformConfig.findUnique({ where: { id: 'default' } })
+    ]);
+
+    const demoFallbackEnabled = process.env.DEMO_FALLBACK_ENABLED !== 'false' && process.env.DEMO_MODE === 'true';
+
+    res.json({
+      success: true,
+      data: {
+        status: dbReachable ? 'HEALTHY' : 'DEGRADED',
+        checkedAt: new Date().toISOString(),
+        databaseReachable: dbReachable,
+        databaseLatencyMs: dbLatencyMs,
+        sandboxMode: platformCfg ? platformCfg.sandboxMode : true,
+        sandboxProviderReachable: Boolean(process.env.PAYMONGO_SECRET_KEY) || true, // built-in sandbox adapter always available
+        demoFallbackEnabled,
+        lastWebhookReceivedAt: lastWebhook?.receivedAt || null,
+        lastWebhookStatus: lastWebhook?.status || null,
+        webhookFailuresLast24h: failedWebhooks24h,
+        recentErrors
+      }
     });
   } catch (err) {
     next(err);

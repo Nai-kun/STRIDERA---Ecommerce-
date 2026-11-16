@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { getBrands } from '../../lib/api';
+import HeaderAuthActions from '../../components/HeaderAuthActions';
 
 export default function BrandsDirectoryPage() {
   const [brands, setBrands] = useState([]);
@@ -34,6 +35,7 @@ export default function BrandsDirectoryPage() {
           <div style={{ display: 'flex', gap: 'var(--space-4)', alignItems: 'center' }}>
             <Link href="/shop" className="btn btn-ghost btn-sm">Shop All</Link>
             <Link href="/seller/register" className="btn btn-outline btn-sm">Become a Merchant</Link>
+            <HeaderAuthActions />
           </div>
         </div>
       </header>

@@ -1,0 +1,42 @@
+flowchart TB
+    Shopper["Shopper"]
+    Seller["Seller"]
+    Admin["Administrator"]
+    Gateway["E-Wallet Sandbox API"]
+
+    P1(("1.0 Session & Auth\nManagement"))
+    P2(("2.0 Catalog & Checkout\nEngine"))
+    P3(("3.0 Payment &\nStock Finalization"))
+    P4(("4.0 Seller\nOperations"))
+    P5(("5.0 Platform Admin\n& Analytics"))
+
+    D1[("D1 Users & Sessions")]
+    D2[("D2 Products & Variants")]
+    D3[("D3 Orders & Items")]
+    D4[("D4 Payments & Webhooks")]
+    D5[("D5 Settings & Audit Logs")]
+
+    Shopper -->|Credentials| P1
+    Seller -->|Credentials / Reg| P1
+    Admin -->|Credentials| P1
+    P1 <-->|Session Token Hash & Role| D1
+
+    Shopper -->|Search / Cart / Checkout| P2
+    P2 -->|Read Active Products| D2
+    P2 -->|Create PENDING Order| D3
+
+    P2 -->|Init Session| P3
+    Gateway -->|Webhook Event| P3
+    P3 -->|Log Webhook| D4
+    P3 -->|Atomic Stock Decrement| D2
+    P3 -->|Mark PAID| D3
+
+    Seller -->|CRUD / Stock / Ship| P4
+    P4 <-->|Own Products & Stock| D2
+    P4 <-->|Own Order Slices & Metrics| D3
+
+    Admin -->|Approve / Roles / Keys| P5
+    P5 <-->|Approvals & Roles| D1
+    P5 <-->|Platform Analytics| D3
+    P5 <-->|Webhook Monitor| D4
+    P5 <-->|Encrypted Keys & Logs| D5

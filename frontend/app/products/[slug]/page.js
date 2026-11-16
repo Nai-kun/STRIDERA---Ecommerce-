@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { submitProductReview, addToWishlist } from '../../../lib/api';
+import HeaderAuthActions from '../../../components/HeaderAuthActions';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
 
@@ -149,9 +150,10 @@ export default function ProductDetailPage() {
           <Link href="/" className="nav-logo" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <img src="/assets/logo/stridera-logo.png" alt="STRIDERA" style={{ height: 36, width: 'auto', objectFit: 'contain' }} />
           </Link>
-          <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
             <Link href="/shop" className="btn btn-ghost btn-sm">← Back to Shop</Link>
-            <Link href="/checkout" className="btn btn-primary btn-sm">Proceed to Checkout</Link>
+            <Link href="/checkout" className="btn btn-outline btn-sm">Checkout</Link>
+            <HeaderAuthActions />
           </div>
         </div>
       </header>

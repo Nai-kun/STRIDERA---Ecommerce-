@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { getBrand } from '../../../lib/api';
+import HeaderAuthActions from '../../../components/HeaderAuthActions';
 
 export default function BrandStorefrontPage() {
   const { slug } = useParams();
@@ -58,6 +59,7 @@ export default function BrandStorefrontPage() {
           <div style={{ display: 'flex', gap: 'var(--space-4)', alignItems: 'center' }}>
             <Link href="/brands" className="btn btn-ghost btn-sm">All Brands</Link>
             <Link href="/shop" className="btn btn-outline btn-sm">Shop All</Link>
+            <HeaderAuthActions />
           </div>
         </div>
       </header>

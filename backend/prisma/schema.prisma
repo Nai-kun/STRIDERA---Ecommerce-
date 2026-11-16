@@ -55,6 +55,20 @@ enum ShoeType {
   TRAINING
   CASUAL
   BOOTS
+  FORMAL
+  LOAFERS
+}
+
+enum ProductStatus {
+  ACTIVE
+  DRAFT
+  ARCHIVED
+}
+
+enum ItemFulfillmentStatus {
+  PENDING
+  SHIPPED
+  CANCELLED
 }
 
 enum OrderStatus {
@@ -157,6 +171,10 @@ model User {
   storeDescription      String?       @map("store_description") @db.Text
   storeLogoUrl          String?       @map("store_logo_url")
   identificationDetails String?       @map("identification_details") @db.Text
+  sessionTokenHash      String?       @map("session_token_hash")
+  sessionExpiresAt      DateTime?     @map("session_expires_at")
+  lastLoginAt           DateTime?     @map("last_login_at")
+  lastSeenAt            DateTime?     @map("last_seen_at")
   createdAt             DateTime      @default(now()) @map("created_at")
   updatedAt             DateTime      @updatedAt @map("updated_at")
 
@@ -245,11 +263,12 @@ model Product {
   basePriceCentavos      Int       @map("base_price_centavos")
   compareAtPriceCentavos Int?      @map("compare_at_price_centavos")
   audience               Audience
-  shoeType               ShoeType  @map("shoe_type")
-  isActive               Boolean   @default(true) @map("is_active")
-  isFeatured             Boolean   @default(false) @map("is_featured")
-  createdAt              DateTime  @default(now()) @map("created_at")
-  updatedAt              DateTime  @updatedAt @map("updated_at")
+  shoeType               ShoeType      @map("shoe_type")
+  status                 ProductStatus @default(ACTIVE)
+  isActive               Boolean       @default(true) @map("is_active")
+  isFeatured             Boolean       @default(false) @map("is_featured")
+  createdAt              DateTime      @default(now()) @map("created_at")
+  updatedAt              DateTime      @updatedAt @map("updated_at")
 
   category      Category         @relation(fields: [categoryId], references: [id])
   seller        User?            @relation("SellerProducts", fields: [sellerId], references: [id])
@@ -260,7 +279,7 @@ model Product {
   reviews       ProductReview[]
 
   @@index([categoryId])
-  @@index([sellerId])
+  @@index([sellerId, status])
   @@index([brandId])
   @@index([audience])
   @@index([shoeType])
@@ -380,6 +399,7 @@ model Order {
   shippingCountry       String?        @map("shipping_country")
   promotionId           String?        @map("promotion_id") @db.Uuid
   notes                 String?        @db.Text
+  stockDecremented      Boolean        @default(false) @map("stock_decremented")
   receivedConfirmedAt   DateTime?      @map("received_confirmed_at")
   createdAt             DateTime       @default(now()) @map("created_at")
   updatedAt             DateTime       @updatedAt @map("updated_at")
@@ -409,13 +429,17 @@ model OrderItem {
   color             String
   unitPriceCentavos Int      @map("unit_price_centavos")
   quantity          Int
-  lineTotalCentavos Int      @map("line_total_centavos")
-  createdAt         DateTime @default(now()) @map("created_at")
+  lineTotalCentavos Int                   @map("line_total_centavos")
+  fulfillmentStatus ItemFulfillmentStatus @default(PENDING) @map("fulfillment_status")
+  shippedAt         DateTime?             @map("shipped_at")
+  stockConflict     Boolean               @default(false) @map("stock_conflict")
+  createdAt         DateTime              @default(now()) @map("created_at")
 
   order          Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
   sellerOrder    SellerOrder?   @relation(fields: [sellerOrderId], references: [id])
   productVariant ProductVariant @relation(fields: [productVariantId], references: [id])
 
+  @@index([productVariantId])
   @@map("order_items")
 }
 
@@ -649,4 +673,30 @@ model AuditLog {
   @@index([userId])
   @@index([entityType, entityId])
   @@map("audit_logs")
+}
+
+model SystemSetting {
+  key            String   @id
+  encryptedValue String   @map("encrypted_value") @db.Text
+  isSecret       Boolean  @default(true) @map("is_secret")
+  updatedBy      String?  @map("updated_by") @db.Uuid
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
+}
+
+model WebhookEvent {
+  id              String    @id @default(uuid()) @db.Uuid
+  provider        String    @default("paymongo")
+  eventId         String    @unique @map("event_id")
+  eventType       String?   @map("event_type")
+  signatureValid  Boolean   @default(false) @map("signature_valid")
+  status          String    @default("RECEIVED")
+  redactedPayload Json?     @map("redacted_payload")
+  error           String?   @db.Text
+  receivedAt      DateTime  @default(now()) @map("received_at")
+  processedAt     DateTime? @map("processed_at")
+
+  @@index([receivedAt])
+  @@map("webhook_events")
 }

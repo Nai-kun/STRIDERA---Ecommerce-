@@ -18,6 +18,11 @@ import {
   updateAdminPlatformConfig,
   getAdminPaymentLogs,
   getAdminAuditLogs,
+  getAdminAnalytics,
+  getAdminApiSettings,
+  updateAdminApiSettings,
+  getAdminWebhooks,
+  getAdminHealth,
   simulatePayment,
   logout
 } from '../../../lib/api';
@@ -50,6 +55,12 @@ export default function AdminDashboardPage() {
   });
   const [paymentLogs, setPaymentLogs] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
+  const [analytics, setAnalytics] = useState(null);
+  const [analyticsPeriod, setAnalyticsPeriod] = useState('30d');
+  const [apiSettings, setApiSettings] = useState(null);
+  const [apiKeyForm, setApiKeyForm] = useState({ PAYMONGO_SECRET_KEY: '', PAYMONGO_PUBLIC_KEY: '', PAYMONGO_WEBHOOK_SECRET: '' });
+  const [webhooks, setWebhooks] = useState([]);
+  const [health, setHealth] = useState(null);
   const [loading, setLoading] = useState(true);
   const [notification, setNotification] = useState(null);
 
@@ -65,7 +76,7 @@ export default function AdminDashboardPage() {
   const loadAll = async () => {
     try {
       setLoading(true);
-      const [repRes, usrRes, selRes, brRes, ordRes, cfgRes, pCfgRes, payRes, audRes] = await Promise.allSettled([
+      const [repRes, usrRes, selRes, brRes, ordRes, cfgRes, pCfgRes, payRes, audRes, anaRes, apiRes, whRes, hltRes] = await Promise.allSettled([
         getAdminReports(),
         getAdminUsers(),
         getAdminSellers(),
@@ -74,7 +85,11 @@ export default function AdminDashboardPage() {
         getAdminConfigStatus(),
         getAdminPlatformConfig(),
         getAdminPaymentLogs(),
-        getAdminAuditLogs()
+        getAdminAuditLogs(),
+        getAdminAnalytics(analyticsPeriod),
+        getAdminApiSettings(),
+        getAdminWebhooks(),
+        getAdminHealth()
       ]);
 
       if (repRes.status === 'fulfilled' && repRes.value.success) setReports(repRes.value.data);
@@ -86,6 +101,10 @@ export default function AdminDashboardPage() {
       if (pCfgRes.status === 'fulfilled' && pCfgRes.value.success) setPlatformConfig(pCfgRes.value.data);
       if (payRes.status === 'fulfilled' && payRes.value.success) setPaymentLogs(payRes.value.data);
       if (audRes.status === 'fulfilled' && audRes.value.success) setAuditLogs(audRes.value.data);
+      if (anaRes.status === 'fulfilled' && anaRes.value.success) setAnalytics(anaRes.value.data);
+      if (apiRes.status === 'fulfilled' && apiRes.value.success) setApiSettings(apiRes.value.data);
+      if (whRes.status === 'fulfilled' && whRes.value.success) setWebhooks(whRes.value.data);
+      if (hltRes.status === 'fulfilled' && hltRes.value.success) setHealth(hltRes.value.data);
     } catch (e) {
       console.error(e);
       notify('Failed to load administrator records', true);
@@ -297,11 +316,13 @@ export default function AdminDashboardPage() {
         }}>
           {[
             ['overview', 'Overview & Metrics'],
+            ['analytics', 'Seller Analytics'],
             ['users', `Users & 7 Roles (${users.length})`],
             ['sellers', `Merchants & Approvals (${pendingSellers.length})`],
             ['orders', `Orders (${orders.length})`],
             ['brands', `Brands (${brands.length})`],
-            ['config', 'Platform Settings & API Config'],
+            ['config', 'Platform Settings & API Keys'],
+            ['health', 'Webhooks & System Health'],
             ['audit', 'Audit Logs']
           ].map(([id, label]) => (
             <button
@@ -841,6 +862,227 @@ export default function AdminDashboardPage() {
                     ))}
                   </div>
                 )}
+              </div>
+            )}
+            {/* ── TAB 8: PLATFORM-WIDE SELLER ANALYTICS (REV-08, D3, D8, D13) ── */}
+            {activeTab === 'analytics' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-3)' }}>
+                  <div>
+                    <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, margin: 0 }}>Platform-Wide Seller Analytics</h2>
+                    <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                      Reconciled over PAID &amp; SHIPPED orders ({analytics?.timezone || 'Asia/Manila'}).
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {['7d', '30d', '90d', 'all'].map(p => (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={async () => {
+                          setAnalyticsPeriod(p);
+                          const res = await getAdminAnalytics(p).catch(() => null);
+                          if (res?.success) setAnalytics(res.data);
+                        }}
+                        className={`btn btn-sm ${analyticsPeriod === p ? 'btn-primary' : 'btn-outline'}`}
+                      >
+                        {p === 'all' ? 'All Time' : p.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Totals Cards */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 'var(--space-4)' }}>
+                  <div style={{ background: 'var(--color-surface)', padding: 'var(--space-5)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sm)' }}>
+                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>PLATFORM REVENUE</div>
+                    <div style={{ fontSize: 'var(--text-2xl)', fontWeight: 800 }}>{analytics?.totals?.revenueFormatted || '₱0.00'}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                      Gateway: ₱{((analytics?.totals?.gatewayRevenueCentavos || 0) / 100).toFixed(2)} · Sim: ₱{((analytics?.totals?.simulatedRevenueCentavos || 0) / 100).toFixed(2)}
+                    </div>
+                  </div>
+                  <div style={{ background: 'var(--color-surface)', padding: 'var(--space-5)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sm)' }}>
+                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>UNITS SOLD</div>
+                    <div style={{ fontSize: 'var(--text-2xl)', fontWeight: 800 }}>{analytics?.totals?.unitsSold || 0}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>{analytics?.totals?.orderCount || 0} paid orders</div>
+                  </div>
+                  <div style={{ background: 'var(--color-surface)', padding: 'var(--space-5)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sm)' }}>
+                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>APPROVED SELLERS</div>
+                    <div style={{ fontSize: 'var(--text-2xl)', fontWeight: 800 }}>{analytics?.totals?.approvedSellers || 0}</div>
+                    <div style={{ fontSize: '11px', color: '#166534', fontWeight: 600 }}>● {analytics?.totals?.onlineSellers || 0} online now</div>
+                  </div>
+                </div>
+
+                {/* Lightweight Top Sellers SVG Chart */}
+                {analytics?.sellers?.length > 0 && (
+                  <div style={{ background: 'var(--color-surface)', padding: 'var(--space-5)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sm)' }}>
+                    <div style={{ fontSize: 'var(--text-xs)', fontWeight: 700, color: 'var(--color-text-muted)', marginBottom: 8 }}>TOP SELLERS BY REVENUE</div>
+                    <svg width="100%" height={Math.max(40, analytics.sellers.length * 30)} role="img" aria-label="Top sellers revenue chart">
+                      {(() => {
+                        const maxRev = Math.max(1, ...analytics.sellers.map(s => s.revenueCentavos));
+                        return analytics.sellers.map((s, idx) => {
+                          const y = idx * 30 + 6;
+                          const pct = Math.round((s.revenueCentavos / maxRev) * 55);
+                          return (
+                            <g key={s.sellerId}>
+                              <text x="0" y={y + 14} fontSize="12" fill="currentColor">{s.storeName.slice(0, 24)}</text>
+                              <rect x="32%" y={y + 2} width={`${pct}%`} height="16" rx="3" fill="#0F172A" />
+                              <text x="98%" y={y + 14} fontSize="12" fontWeight="700" textAnchor="end" fill="currentColor">{s.revenueFormatted}</text>
+                            </g>
+                          );
+                        });
+                      })()}
+                    </svg>
+                  </div>
+                )}
+
+                {/* Per-Seller Table */}
+                <div style={{ background: 'var(--color-surface)', padding: 'var(--space-6)', borderRadius: 'var(--radius-xl)', boxShadow: 'var(--shadow-sm)', overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--text-sm)' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid var(--color-border)', textAlign: 'left' }}>
+                        <th style={{ padding: '10px 8px' }}>Seller Store</th>
+                        <th style={{ padding: '10px 8px' }}>Activity</th>
+                        <th style={{ padding: '10px 8px' }}>Listings</th>
+                        <th style={{ padding: '10px 8px' }}>Low Stock</th>
+                        <th style={{ padding: '10px 8px' }}>Orders</th>
+                        <th style={{ padding: '10px 8px' }}>Units</th>
+                        <th style={{ padding: '10px 8px' }}>Revenue</th>
+                        <th style={{ padding: '10px 8px' }}>Fulfilment</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(analytics?.sellers || []).map(s => (
+                        <tr key={s.sellerId} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                          <td style={{ padding: '10px 8px', fontWeight: 600 }}>
+                            {s.storeName}
+                            <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: 400 }}>{s.email}</div>
+                          </td>
+                          <td style={{ padding: '10px 8px' }}>
+                            {s.onlineNow ? (
+                              <span style={{ background: '#DCFCE7', color: '#166534', padding: '2px 8px', borderRadius: 999, fontSize: '11px', fontWeight: 700 }}>● Online now</span>
+                            ) : (
+                              <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                                {s.lastSeenAt ? `Last active ${new Date(s.lastSeenAt).toLocaleString()}` : 'Not seen yet'}
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ padding: '10px 8px' }}>{s.activeListings}</td>
+                          <td style={{ padding: '10px 8px' }}>{s.lowStockItems}</td>
+                          <td style={{ padding: '10px 8px' }}>{s.orderCount}</td>
+                          <td style={{ padding: '10px 8px' }}>{s.unitsSold}</td>
+                          <td style={{ padding: '10px 8px', fontWeight: 700 }}>{s.revenueFormatted}</td>
+                          <td style={{ padding: '10px 8px' }}>{s.fulfillmentRate}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* ── TAB 9: WEBHOOKS, ENCRYPTED API KEYS & SYSTEM HEALTH (REV-10, D7) ── */}
+            {activeTab === 'health' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+                {/* Real Health Checks */}
+                <div style={{ background: 'var(--color-surface)', padding: 'var(--space-6)', borderRadius: 'var(--radius-xl)', boxShadow: 'var(--shadow-sm)' }}>
+                  <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, marginBottom: 'var(--space-4)' }}>System Health Diagnostics</h2>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--space-4)' }}>
+                    <div style={{ padding: 'var(--space-4)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
+                      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>DATABASE</div>
+                      <div style={{ fontWeight: 700, color: health?.databaseReachable ? '#166534' : '#B91C1C' }}>
+                        {health?.databaseReachable ? `Reachable (${health.databaseLatencyMs} ms)` : 'Unreachable'}
+                      </div>
+                    </div>
+                    <div style={{ padding: 'var(--space-4)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
+                      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>SANDBOX PROVIDER</div>
+                      <div style={{ fontWeight: 700 }}>{health?.sandboxMode ? 'Sandbox Mode Active' : 'Disabled'}</div>
+                    </div>
+                    <div style={{ padding: 'var(--space-4)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
+                      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>WEBHOOK FAILURES (24H)</div>
+                      <div style={{ fontWeight: 700, color: (health?.webhookFailuresLast24h || 0) > 0 ? '#B45309' : '#166534' }}>
+                        {health?.webhookFailuresLast24h || 0}
+                      </div>
+                    </div>
+                    <div style={{ padding: 'var(--space-4)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
+                      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>DEMO FALLBACK</div>
+                      <div style={{ fontWeight: 700 }}>{health?.demoFallbackEnabled ? 'Enabled' : 'Disabled'}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Encrypted Sandbox API Keys */}
+                <div style={{ background: 'var(--color-surface)', padding: 'var(--space-6)', borderRadius: 'var(--radius-xl)', boxShadow: 'var(--shadow-sm)' }}>
+                  <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, marginBottom: 'var(--space-2)' }}>Encrypted Sandbox API Keys</h2>
+                  <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-4)' }}>
+                    Keys are encrypted at rest (AES-256-GCM) and displayed masked. Live keys (sk_live_, pk_live_) are rejected.
+                  </p>
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      try {
+                        const res = await updateAdminApiSettings(apiKeyForm);
+                        notify(res.message || 'Sandbox API settings saved!');
+                        setApiKeyForm({ PAYMONGO_SECRET_KEY: '', PAYMONGO_PUBLIC_KEY: '', PAYMONGO_WEBHOOK_SECRET: '' });
+                        loadAll();
+                      } catch (err) {
+                        notify(err.message || 'Failed to save API keys', true);
+                      }
+                    }}
+                    style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 'var(--space-4)' }}
+                  >
+                    {['PAYMONGO_SECRET_KEY', 'PAYMONGO_PUBLIC_KEY', 'PAYMONGO_WEBHOOK_SECRET'].map(k => (
+                      <div key={k}>
+                        <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 4 }}>
+                          {k} <span style={{ color: 'var(--color-text-muted)' }}>({apiSettings?.settings?.[k]?.masked || 'unset'})</span>
+                        </label>
+                        <input
+                          type="password"
+                          className="form-input"
+                          placeholder="Enter new sandbox key..."
+                          value={apiKeyForm[k]}
+                          onChange={e => setApiKeyForm(p => ({ ...p, [k]: e.target.value }))}
+                        />
+                      </div>
+                    ))}
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <button type="submit" className="btn btn-primary btn-sm">Save Encrypted Sandbox Keys</button>
+                    </div>
+                  </form>
+                </div>
+
+                {/* Webhook Events Monitor */}
+                <div style={{ background: 'var(--color-surface)', padding: 'var(--space-6)', borderRadius: 'var(--radius-xl)', boxShadow: 'var(--shadow-sm)', overflowX: 'auto' }}>
+                  <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, marginBottom: 'var(--space-4)' }}>Webhook Events Monitor</h2>
+                  {webhooks.length === 0 ? (
+                    <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>No webhook events recorded yet.</p>
+                  ) : (
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--text-xs)' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '2px solid var(--color-border)', textAlign: 'left' }}>
+                          <th style={{ padding: '8px' }}>Event ID</th>
+                          <th style={{ padding: '8px' }}>Type</th>
+                          <th style={{ padding: '8px' }}>Signature</th>
+                          <th style={{ padding: '8px' }}>Status</th>
+                          <th style={{ padding: '8px' }}>Received</th>
+                          <th style={{ padding: '8px' }}>Error</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {webhooks.map(w => (
+                          <tr key={w.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                            <td style={{ padding: '8px', fontFamily: 'monospace' }}>{w.eventId}</td>
+                            <td style={{ padding: '8px' }}>{w.eventType || 'N/A'}</td>
+                            <td style={{ padding: '8px' }}>{w.signatureValid ? 'Valid' : 'Invalid'}</td>
+                            <td style={{ padding: '8px', fontWeight: 700 }}>{w.status}</td>
+                            <td style={{ padding: '8px' }}>{new Date(w.receivedAt).toLocaleString()}</td>
+                            <td style={{ padding: '8px', color: 'var(--color-error)' }}>{w.error || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
               </div>
             )}
           </>

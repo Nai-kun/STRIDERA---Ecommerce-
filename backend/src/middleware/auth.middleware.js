@@ -1,4 +1,5 @@
-// Authentication middleware — JWT verification and role checks across all 7 roles (FR-1.3, FR-1.4, FR-1.9)
+// Authentication middleware — Persistent Session_Token (SHA-256), JWT & RBAC across roles (REV-02, REV-12, D3, D4, D10)
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const prisma = require('../lib/prisma');
 const { createError } = require('./error.middleware');
@@ -18,38 +19,80 @@ const USER_SELECT = {
   storeName: true,
   storeDescription: true,
   storeLogoUrl: true,
-  identificationDetails: true
+  identificationDetails: true,
+  sessionTokenHash: true,
+  sessionExpiresAt: true,
+  lastSeenAt: true
 };
 
+function hashSessionToken(rawToken) {
+  return crypto.createHash('sha256').update(String(rawToken)).digest('hex');
+}
+
+function touchLastSeen(user) {
+  const now = Date.now();
+  const last = user.lastSeenAt ? new Date(user.lastSeenAt).getTime() : 0;
+  if (now - last > 60 * 1000) {
+    prisma.user.update({
+      where: { id: user.id },
+      data: { lastSeenAt: new Date(now) }
+    }).catch(() => {});
+  }
+}
+
+async function resolveUserFromRequest(req) {
+  const rawSession = req.cookies?.stridera_session;
+  if (rawSession) {
+    const tokenHash = hashSessionToken(rawSession);
+    const user = await prisma.user.findFirst({
+      where: { sessionTokenHash: tokenHash },
+      select: USER_SELECT,
+    });
+    if (user && (!user.sessionExpiresAt || new Date(user.sessionExpiresAt) > new Date())) {
+      return user;
+    }
+    return null;
+  }
+
+  let token = req.cookies?.token;
+  if (!token && req.headers.authorization?.startsWith('Bearer ')) {
+    token = req.headers.authorization.split(' ')[1];
+  }
+  if (!token) return null;
+
+  const decoded = jwt.verify(token, JWT_SECRET);
+  const user = await prisma.user.findUnique({
+    where: { id: decoded.userId },
+    select: USER_SELECT,
+  });
+
+  if (!user) return null;
+  // If token carries a session id prefix, enforce active session match (supports logout/password/role invalidation)
+  if (decoded.sid) {
+    if (!user.sessionTokenHash || !user.sessionTokenHash.startsWith(decoded.sid)) {
+      return null;
+    }
+    if (user.sessionExpiresAt && new Date(user.sessionExpiresAt) <= new Date()) {
+      return null;
+    }
+  }
+  return user;
+}
+
 /**
- * Verify JWT token from cookie or Authorization header
- * Sets req.user with full role and accountStatus context
+ * Verify persistent session cookie or JWT Authorization header
  */
 async function authenticate(req, res, next) {
   try {
-    let token = req.cookies?.token;
-
-    // Fallback to Authorization header
-    if (!token && req.headers.authorization?.startsWith('Bearer ')) {
-      token = req.headers.authorization.split(' ')[1];
-    }
-
-    if (!token) {
-      throw createError('Authentication required', 401);
-    }
-
-    const decoded = jwt.verify(token, JWT_SECRET);
-
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      select: USER_SELECT,
-    });
+    const user = await resolveUserFromRequest(req);
 
     if (!user || !user.isActive || (user.accountStatus && user.accountStatus !== 'ACTIVE')) {
-      throw createError('User account not found, deactivated, or suspended', 401);
+      throw createError('Authentication required or session expired', 401);
     }
 
-    req.user = user;
+    touchLastSeen(user);
+    const { sessionTokenHash, sessionExpiresAt, ...safeUser } = user;
+    req.user = safeUser;
     next();
   } catch (error) {
     if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
@@ -60,24 +103,15 @@ async function authenticate(req, res, next) {
 }
 
 /**
- * Optional authentication — sets req.user if token is present, but doesn't fail
+ * Optional authentication — sets req.user if valid session/token is present, but doesn't fail
  */
 async function optionalAuth(req, res, next) {
   try {
-    let token = req.cookies?.token;
-    if (!token && req.headers.authorization?.startsWith('Bearer ')) {
-      token = req.headers.authorization.split(' ')[1];
-    }
-
-    if (token) {
-      const decoded = jwt.verify(token, JWT_SECRET);
-      const user = await prisma.user.findUnique({
-        where: { id: decoded.userId },
-        select: USER_SELECT,
-      });
-      if (user && user.isActive && (!user.accountStatus || user.accountStatus === 'ACTIVE')) {
-        req.user = user;
-      }
+    const user = await resolveUserFromRequest(req);
+    if (user && user.isActive && (!user.accountStatus || user.accountStatus === 'ACTIVE')) {
+      touchLastSeen(user);
+      const { sessionTokenHash, sessionExpiresAt, ...safeUser } = user;
+      req.user = safeUser;
     }
   } catch {
     // Silently ignore invalid tokens for optional auth
@@ -162,24 +196,76 @@ function requireFinance(req, res, next) {
 }
 
 /**
- * Generate JWT token
+ * Generate JWT token (linked to session hash prefix when provided)
  */
-function generateToken(userId) {
-  return jwt.sign({ userId }, JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRES_IN || '7d',
+function generateToken(userId, sessionHashPrefix = null) {
+  const payload = sessionHashPrefix ? { userId, sid: sessionHashPrefix } : { userId };
+  return jwt.sign(payload, JWT_SECRET, {
+    expiresIn: process.env.JWT_EXPIRES_IN || '30d',
   });
 }
 
 /**
- * Set JWT as httpOnly cookie
+ * Set persistent HttpOnly cookies (stridera_session + legacy token)
  */
-function setTokenCookie(res, token) {
+function setTokenCookie(res, token, rawSessionToken = null, keepSignedIn = true) {
+  const secure = process.env.COOKIE_SECURE === 'true' || process.env.NODE_ENV === 'production';
+  const maxAge = keepSignedIn ? 30 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+
   res.cookie('token', token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure,
     sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    maxAge,
   });
+
+  if (rawSessionToken) {
+    res.cookie('stridera_session', rawSessionToken, {
+      httpOnly: true,
+      secure,
+      sameSite: 'lax',
+      maxAge,
+    });
+  }
+}
+
+/**
+ * Rotate & persist opaque Session_Token (SHA-256) in DB + set cookies + return JWT
+ */
+async function issuePersistentSession(res, userId, keepSignedIn = true) {
+  const rawSessionToken = crypto.randomBytes(32).toString('base64url');
+  const sessionTokenHash = hashSessionToken(rawSessionToken);
+  const ttlMs = keepSignedIn ? 30 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+  const sessionExpiresAt = new Date(Date.now() + ttlMs);
+  const now = new Date();
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      sessionTokenHash,
+      sessionExpiresAt,
+      lastLoginAt: now,
+      lastSeenAt: now,
+    }
+  });
+
+  const jwtToken = generateToken(userId, sessionTokenHash.slice(0, 16));
+  setTokenCookie(res, jwtToken, rawSessionToken, keepSignedIn);
+  return { jwtToken, rawSessionToken, sessionExpiresAt };
+}
+
+/**
+ * Clear persistent session in DB and cookies
+ */
+async function clearPersistentSession(res, userId = null) {
+  res.clearCookie('token');
+  res.clearCookie('stridera_session');
+  if (userId) {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { sessionTokenHash: null, sessionExpiresAt: null }
+    }).catch(() => {});
+  }
 }
 
 module.exports = {
@@ -195,5 +281,8 @@ module.exports = {
   requireSupport,
   requireFinance,
   generateToken,
-  setTokenCookie
+  setTokenCookie,
+  issuePersistentSession,
+  clearPersistentSession,
+  hashSessionToken
 };

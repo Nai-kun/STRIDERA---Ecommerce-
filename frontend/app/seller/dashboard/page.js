@@ -2,11 +2,14 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { getSellerDashboard, getSellerProfile, updateSellerProfile, logout } from '../../../lib/api';
+import { getSellerDashboard, getSellerProfile, updateSellerProfile, getSellerMetrics, getMe, logout } from '../../../lib/api';
 
 export default function SellerDashboardPage() {
   const [profile, setProfile] = useState(null);
   const [metrics, setMetrics] = useState(null);
+  const [productMetrics, setProductMetrics] = useState(null);
+  const [period, setPeriod] = useState('30d');
+  const [pendingUser, setPendingUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [editModal, setEditModal] = useState(false);
@@ -19,12 +22,13 @@ export default function SellerDashboardPage() {
   });
   const [msg, setMsg] = useState(null);
 
-  const fetchDashboard = async () => {
+  const fetchDashboard = async (selectedPeriod = period) => {
     try {
       setLoading(true);
-      const [profileRes, dashboardRes] = await Promise.all([
+      const [profileRes, dashboardRes, prodMetRes] = await Promise.all([
         getSellerProfile(),
-        getSellerDashboard()
+        getSellerDashboard(),
+        getSellerMetrics(selectedPeriod)
       ]);
 
       if (profileRes.success) {
@@ -38,7 +42,17 @@ export default function SellerDashboardPage() {
         });
       }
       if (dashboardRes.success) setMetrics(dashboardRes.data);
+      if (prodMetRes.success) setProductMetrics(prodMetRes.data);
     } catch (err) {
+      // Check if logged in as PENDING seller -> show Awaiting Approval screen (T-AUTH-05)
+      try {
+        const me = await getMe();
+        if (me?.success && me.data?.role === 'SELLER' && me.data?.sellerStatus !== 'APPROVED') {
+          setPendingUser(me.data);
+          setError(null);
+          return;
+        }
+      } catch {}
       setError(err.message || 'Failed to load seller dashboard. Please ensure you are logged in as an approved merchant.');
     } finally {
       setLoading(false);
@@ -46,8 +60,8 @@ export default function SellerDashboardPage() {
   };
 
   useEffect(() => {
-    fetchDashboard();
-  }, []);
+    fetchDashboard(period);
+  }, [period]);
 
   const handleSaveStoreProfile = async (e) => {
     e.preventDefault();
@@ -79,6 +93,35 @@ export default function SellerDashboardPage() {
     return (
       <div className="container" style={{ padding: 'var(--space-16) 0', textAlign: 'center' }}>
         <p style={{ color: 'var(--color-text-muted)' }}>Loading Merchant Hub...</p>
+      </div>
+    );
+  }
+
+  if (pendingUser) {
+    return (
+      <div className="container" style={{ padding: 'var(--space-16) 0', maxWidth: '640px' }}>
+        <div style={{
+          background: '#FFFBEB',
+          border: '1px solid #FCD34D',
+          borderRadius: 'var(--radius-lg)',
+          padding: 'var(--space-8)',
+          textAlign: 'center'
+        }}>
+          <span style={{
+            display: 'inline-block', padding: '4px 12px', borderRadius: 'var(--radius-full)',
+            background: '#FEF3C7', color: '#92400E', fontSize: 'var(--text-xs)', fontWeight: 700, marginBottom: 'var(--space-3)'
+          }}>
+            STATUS: {pendingUser.sellerStatus || 'PENDING_APPROVAL'}
+          </span>
+          <h2 style={{ marginBottom: 'var(--space-2)' }}>Awaiting Administrator Approval</h2>
+          <p style={{ color: 'var(--color-text-muted)', marginBottom: 'var(--space-4)', fontSize: 'var(--text-sm)' }}>
+            Your merchant application for <strong>{pendingUser.storeName || pendingUser.email}</strong> has been received and is under review. You will be able to publish listings and manage orders once an administrator approves your store.
+          </p>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'center' }}>
+            <Link href="/shop" className="btn btn-outline">Browse Storefront</Link>
+            <button onClick={handleLogout} className="btn btn-primary">Sign Out</button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -295,6 +338,116 @@ export default function SellerDashboardPage() {
             </div>
             <span style={{ fontSize: '11px', color: 'var(--color-text-subtle)' }}>Listed in storefront</span>
           </div>
+        </div>
+
+        {/* Product Performance Metrics Section (REV-07, FR-4.4, D8) */}
+        <div style={{
+          background: 'var(--color-surface)',
+          padding: 'var(--space-6)',
+          borderRadius: 'var(--radius-lg)',
+          boxShadow: 'var(--shadow-sm)',
+          marginBottom: 'var(--space-8)'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
+            <div>
+              <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, margin: 0 }}>Product Performance Metrics</h2>
+              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 2 }}>
+                Counts PAID &amp; SHIPPED orders only (Asia/Manila). {productMetrics && !productMetrics.badgesApplied ? 'Fewer than 5 active products — ranked without High/Low badges.' : 'Top 20% High-selling · Bottom 20% Low-selling'}
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {[
+                { key: '7d', label: '7 Days' },
+                { key: '30d', label: '30 Days' },
+                { key: '90d', label: '90 Days' },
+                { key: 'all', label: 'All Time' }
+              ].map(opt => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setPeriod(opt.key)}
+                  className={`btn btn-sm ${period === opt.key ? 'btn-primary' : 'btn-outline'}`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {(!productMetrics?.products || productMetrics.products.length === 0) ? (
+            <p style={{ color: 'var(--color-text-muted)', textAlign: 'center', padding: 'var(--space-6) 0', fontSize: 'var(--text-sm)' }}>
+              No products or sales recorded yet for this period.
+            </p>
+          ) : (
+            <>
+              {/* Lightweight Inline SVG Bar Chart */}
+              <div style={{ marginBottom: 'var(--space-5)', padding: 'var(--space-3)', background: 'var(--color-bg)', borderRadius: 'var(--radius-md)' }}>
+                <div style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: 8 }}>
+                  Units Sold by Product ({period.toUpperCase()})
+                </div>
+                <svg width="100%" height={Math.max(40, Math.min(productMetrics.products.length, 6) * 28)} role="img" aria-label="Product units sold chart">
+                  {(() => {
+                    const top = productMetrics.products.slice(0, 6);
+                    const maxUnits = Math.max(1, ...top.map(p => p.unitsSold));
+                    return top.map((p, idx) => {
+                      const y = idx * 28 + 4;
+                      const barPct = Math.round((p.unitsSold / maxUnits) * 58);
+                      return (
+                        <g key={p.productId}>
+                          <text x="0" y={y + 14} fontSize="11" fill="currentColor">{p.name.slice(0, 26)}</text>
+                          <rect x="35%" y={y + 3} width={`${barPct}%`} height="14" rx="3" fill="#2563EB" />
+                          <text x="95%" y={y + 14} fontSize="11" fontWeight="700" textAnchor="end" fill="currentColor">{p.unitsSold} u</text>
+                        </g>
+                      );
+                    });
+                  })()}
+                </svg>
+              </div>
+
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--text-sm)' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid var(--color-border)', textAlign: 'left' }}>
+                      <th style={{ padding: '10px 8px' }}>Product</th>
+                      <th style={{ padding: '10px 8px' }}>Status</th>
+                      <th style={{ padding: '10px 8px' }}>Stock</th>
+                      <th style={{ padding: '10px 8px' }}>Orders</th>
+                      <th style={{ padding: '10px 8px' }}>Units Sold</th>
+                      <th style={{ padding: '10px 8px' }}>Revenue</th>
+                      <th style={{ padding: '10px 8px' }}>Performance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {productMetrics.products.map(p => (
+                      <tr key={p.productId} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                        <td style={{ padding: '10px 8px', fontWeight: 600 }}>
+                          {p.name}
+                          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: 400 }}>{p.sku}</div>
+                        </td>
+                        <td style={{ padding: '10px 8px' }}>{p.status}</td>
+                        <td style={{ padding: '10px 8px' }}>{p.currentStock}</td>
+                        <td style={{ padding: '10px 8px' }}>{p.orderCount}</td>
+                        <td style={{ padding: '10px 8px', fontWeight: 700 }}>{p.unitsSold}</td>
+                        <td style={{ padding: '10px 8px', fontWeight: 700 }}>{p.revenueFormatted}</td>
+                        <td style={{ padding: '10px 8px' }}>
+                          {p.performanceLabel === 'HIGH_SELLING' && (
+                            <span style={{ background: '#DCFCE7', color: '#166534', padding: '2px 8px', borderRadius: 999, fontSize: '11px', fontWeight: 700 }}>High-selling</span>
+                          )}
+                          {p.performanceLabel === 'LOW_SELLING' && (
+                            <span style={{ background: '#FEF3C7', color: '#92400E', padding: '2px 8px', borderRadius: 999, fontSize: '11px', fontWeight: 700 }}>Low-selling</span>
+                          )}
+                          {p.performanceLabel === 'NO_SALES' && (
+                            <span style={{ background: '#F3F4F6', color: '#374151', padding: '2px 8px', borderRadius: 999, fontSize: '11px', fontWeight: 700 }}>No sales</span>
+                          )}
+                          {!p.performanceLabel && <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Ranked</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Dual Section: Low Stock Alerts & Recent Orders */}

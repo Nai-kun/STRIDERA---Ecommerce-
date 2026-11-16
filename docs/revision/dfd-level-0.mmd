@@ -1,0 +1,18 @@
+flowchart LR
+    Shopper["Shopper"]
+    Seller["Seller / Merchant"]
+    Admin["Administrator"]
+    Gateway["E-Wallet Sandbox API (PayMongo)"]
+    System(("0.0 STRIDERA\nMulti-Seller Platform"))
+
+    Shopper -->|"Browse, Cart, Checkout, Login"| System
+    System -->|"Catalog, Order & Payment Status"| Shopper
+
+    Seller -->|"Listings, Stock Updates, Fulfilment Updates"| System
+    System -->|"Orders Slice, Product Metrics, Status"| Seller
+
+    Admin -->|"Seller Approvals, Role Changes, Sandbox API Keys"| System
+    System -->|"Platform Analytics, Webhook & Health Logs"| Admin
+
+    System -->|"Payment Session Request"| Gateway
+    Gateway -->|"Signed Webhook / Payment Result"| System

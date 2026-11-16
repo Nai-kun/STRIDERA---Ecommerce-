@@ -1,0 +1,29 @@
+flowchart TB
+    Gateway["E-Wallet Sandbox / Demo Fallback"]
+    Seller["Seller"]
+
+    P31(("3.1 Verify Signature\n& Log Webhook"))
+    P32(("3.2 Idempotency Check\n(finalizePayment)"))
+    P33(("3.3 Conditional Atomic\nStock Decrement"))
+    P34(("3.4 Flag Stock Conflict\n& Block Shipping"))
+    P41(("4.1 Seller Fulfilment\nUpdate"))
+
+    D3[("D3 Orders & Order Items")]
+    D2[("D2 Product Variants")]
+    D4[("D4 Webhook Events & Payments")]
+    D5[("D5 Audit Logs")]
+
+    Gateway -->|POST /webhook or /simulate| P31
+    P31 -->|Invalid Signature: 401 + Log| D4
+    P31 -->|Valid| P32
+    P32 -->|Already PAID: No-op| D3
+    P32 -->|PENDING| P33
+    P33 -->|stock >= qty: Decrement| D2
+    P33 -->|count == 0: Last Pair Taken| P34
+    P34 -->|stock_conflict = true| D3
+    P34 -->|Audit Event| D5
+    P33 -->|Mark PAID + Record Payment| D3
+
+    Seller -->|Mark Slice SHIPPED| P41
+    P41 -->|Verify PAID & No Conflict| D3
+    P41 -->|Update Item & Derive Order Status| D3

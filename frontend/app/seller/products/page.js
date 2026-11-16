@@ -5,6 +5,10 @@ import Link from 'next/link';
 import {
   getSellerProducts,
   createSellerProduct,
+  updateSellerProduct,
+  archiveSellerProduct,
+  restoreSellerProduct,
+  uploadSellerProductImage,
   addSellerVariant,
   adjustSellerStock,
   getCategories
@@ -19,10 +23,20 @@ export default function SellerProductsPage() {
 
   // Modals state
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [showStockModal, setShowStockModal] = useState(false);
   const [showVariantModal, setShowVariantModal] = useState(false);
   const [selectedVariant, setSelectedVariant] = useState(null);
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [editProductForm, setEditProductForm] = useState({
+    id: '',
+    name: '',
+    categoryId: '',
+    basePricePesos: '',
+    audience: 'UNISEX',
+    shoeType: 'RUNNING',
+    description: ''
+  });
 
   // Form states
   const [newProduct, setNewProduct] = useState({
@@ -264,15 +278,95 @@ export default function SellerProductsPage() {
                     </div>
                   </div>
 
-                  <button
-                    className="btn btn-outline btn-sm"
-                    onClick={() => {
-                      setSelectedProduct(product);
-                      setShowVariantModal(true);
-                    }}
-                  >
-                    + Add Variant
-                  </button>
+                  <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <span style={{
+                      padding: '4px 10px', borderRadius: 'var(--radius-full)', fontSize: '11px', fontWeight: 700,
+                      background: product.isActive ? '#DCFCE7' : '#F3F4F6',
+                      color: product.isActive ? '#166534' : '#374151'
+                    }}>
+                      {product.status || (product.isActive ? 'ACTIVE' : 'ARCHIVED')}
+                    </span>
+
+                    <label className="btn btn-outline btn-sm" style={{ cursor: 'pointer' }}>
+                      📷 Upload Image
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        style={{ display: 'none' }}
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          try {
+                            await uploadSellerProductImage(product.id, file, (product.images?.length || 0) === 0);
+                            notify('Product image uploaded!');
+                            loadData();
+                          } catch (err) {
+                            notify(err.message || 'Upload failed', true);
+                          }
+                        }}
+                      />
+                    </label>
+
+                    <button
+                      className="btn btn-outline btn-sm"
+                      onClick={() => {
+                        setEditProductForm({
+                          id: product.id,
+                          name: product.name,
+                          categoryId: product.categoryId,
+                          basePricePesos: (product.basePriceCentavos / 100).toFixed(2),
+                          audience: product.audience,
+                          shoeType: product.shoeType,
+                          description: product.description || ''
+                        });
+                        setShowEditModal(true);
+                      }}
+                    >
+                      ✏️ Edit
+                    </button>
+
+                    {product.isActive ? (
+                      <button
+                        className="btn btn-outline btn-sm"
+                        onClick={async () => {
+                          try {
+                            await archiveSellerProduct(product.id);
+                            notify('Product archived (hidden from storefront).');
+                            loadData();
+                          } catch (err) {
+                            notify(err.message || 'Archive failed', true);
+                          }
+                        }}
+                      >
+                        Archive
+                      </button>
+                    ) : (
+                      <button
+                        className="btn btn-primary btn-sm"
+                        onClick={async () => {
+                          try {
+                            await restoreSellerProduct(product.id);
+                            notify('Product restored to storefront!');
+                            loadData();
+                          } catch (err) {
+                            notify(err.message || 'Restore failed', true);
+                          }
+                        }}
+                      >
+                        Restore
+                      </button>
+                    )}
+
+                    <button
+                      className="btn btn-outline btn-sm"
+                      onClick={() => {
+                        setSelectedProduct(product);
+                        setShowVariantModal(true);
+                      }}
+                    >
+                      + Add Variant
+                    </button>
+                  </div>
                 </div>
 
                 {/* Variants List for this Product */}
@@ -434,6 +528,8 @@ export default function SellerProductsPage() {
                     <option value="LIFESTYLE">Lifestyle</option>
                     <option value="BASKETBALL">Basketball</option>
                     <option value="TRAINING">Training</option>
+                    <option value="FORMAL">Formal</option>
+                    <option value="LOAFERS">Loafers</option>
                   </select>
                 </div>
               </div>
@@ -591,6 +687,82 @@ export default function SellerProductsPage() {
               <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end', marginTop: 'var(--space-2)' }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setShowVariantModal(false)}>Cancel</button>
                 <button type="submit" className="btn btn-primary">Create Variant</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* Edit Product Modal */}
+      {showEditModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--space-4)'
+        }}>
+          <div style={{ background: 'var(--color-surface)', borderRadius: 'var(--radius-lg)', padding: 'var(--space-6)', width: '100%', maxWidth: 500 }}>
+            <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, marginBottom: 'var(--space-4)' }}>Edit Product</h2>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                try {
+                  await updateSellerProduct(editProductForm.id, {
+                    name: editProductForm.name,
+                    categoryId: editProductForm.categoryId,
+                    basePriceCentavos: Math.round(parseFloat(editProductForm.basePricePesos) * 100),
+                    audience: editProductForm.audience,
+                    shoeType: editProductForm.shoeType,
+                    description: editProductForm.description
+                  });
+                  notify('Product updated!');
+                  setShowEditModal(false);
+                  loadData();
+                } catch (err) {
+                  notify(err.message || 'Update failed', true);
+                }
+              }}
+              style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}
+            >
+              <div>
+                <label className="form-label">Product Name</label>
+                <input type="text" required className="form-input" value={editProductForm.name} onChange={e => setEditProductForm(p => ({ ...p, name: e.target.value }))} />
+              </div>
+              <div>
+                <label className="form-label">Category</label>
+                <select className="form-input" value={editProductForm.categoryId} onChange={e => setEditProductForm(p => ({ ...p, categoryId: e.target.value }))}>
+                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="form-label">Base Price (PHP)</label>
+                <input type="number" step="0.01" min="1" required className="form-input" value={editProductForm.basePricePesos} onChange={e => setEditProductForm(p => ({ ...p, basePricePesos: e.target.value }))} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
+                <div>
+                  <label className="form-label">Audience</label>
+                  <select className="form-input" value={editProductForm.audience} onChange={e => setEditProductForm(p => ({ ...p, audience: e.target.value }))}>
+                    <option value="MEN">Men</option>
+                    <option value="WOMEN">Women</option>
+                    <option value="UNISEX">Unisex</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">Shoe Type</label>
+                  <select className="form-input" value={editProductForm.shoeType} onChange={e => setEditProductForm(p => ({ ...p, shoeType: e.target.value }))}>
+                    <option value="RUNNING">Running</option>
+                    <option value="LIFESTYLE">Lifestyle</option>
+                    <option value="BASKETBALL">Basketball</option>
+                    <option value="TRAINING">Training</option>
+                    <option value="FORMAL">Formal</option>
+                    <option value="LOAFERS">Loafers</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="form-label">Description</label>
+                <textarea rows={3} className="form-input" value={editProductForm.description} onChange={e => setEditProductForm(p => ({ ...p, description: e.target.value }))} />
+              </div>
+              <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end', marginTop: 'var(--space-2)' }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setShowEditModal(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary">Save Changes</button>
               </div>
             </form>
           </div>

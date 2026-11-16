@@ -53,8 +53,8 @@ export const removeCartItem = (itemId) =>
   apiFetch(`/cart/items/${itemId}`, { method: 'DELETE' });
 
 // Auth & Account
-export const login = (email, password) =>
-  apiFetch('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+export const login = (email, password, keepSignedIn = true) =>
+  apiFetch('/auth/login', { method: 'POST', body: JSON.stringify({ email, password, keepSignedIn }) });
 export const register = (data) =>
   apiFetch('/auth/register', { method: 'POST', body: JSON.stringify(data) });
 export const logout = () => apiFetch('/auth/logout', { method: 'POST' });
@@ -230,3 +230,36 @@ export const updateAdminUserStatus = (id, accountStatus) =>
 export const getAdminPlatformConfig = () => apiFetch('/admin/platform-config');
 export const updateAdminPlatformConfig = (data) =>
   apiFetch('/admin/platform-config', { method: 'PUT', body: JSON.stringify(data) });
+
+// Revision Update — Seller Metrics, Product Edit/Archive/Restore/Images & Admin Analytics/Settings/Webhooks/Health
+export const getSellerMetrics = (period = '30d') =>
+  apiFetch(`/seller/metrics?period=${encodeURIComponent(period)}`);
+export const archiveSellerProduct = (id) =>
+  apiFetch(`/seller/products/${id}`, { method: 'DELETE' });
+export const restoreSellerProduct = (id) =>
+  apiFetch(`/seller/products/${id}/restore`, { method: 'PATCH' });
+export const deleteSellerProductImage = (productId, imageId) =>
+  apiFetch(`/seller/products/${productId}/images/${imageId}`, { method: 'DELETE' });
+export async function uploadSellerProductImage(productId, file, isPrimary = false) {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('stridera_token') : null;
+  const formData = new FormData();
+  formData.append('image', file);
+  formData.append('isPrimary', String(isPrimary));
+  const res = await fetch(`${API_BASE}/seller/products/${productId}/images`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || 'Image upload failed');
+  return data;
+}
+
+export const getAdminAnalytics = (period = '30d') =>
+  apiFetch(`/admin/analytics?period=${encodeURIComponent(period)}`);
+export const getAdminApiSettings = () => apiFetch('/admin/api-settings');
+export const updateAdminApiSettings = (data) =>
+  apiFetch('/admin/api-settings', { method: 'PUT', body: JSON.stringify(data) });
+export const getAdminWebhooks = () => apiFetch('/admin/webhooks');
+export const getAdminHealth = () => apiFetch('/admin/health');

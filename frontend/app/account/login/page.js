@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { login, forgotPassword } from '../../../lib/api';
+import { login, forgotPassword, getMe } from '../../../lib/api';
 
 const DEMO_ROLES = [
   { role: '1. Shopper', email: 'demo@stridera.ph', pass: 'Customer@123!', portal: '/shop', badge: '#0284c7' },
@@ -31,8 +31,22 @@ function getRedirectForRole(role) {
 export default function LoginPage() {
   const router = useRouter();
   const [form, setForm] = useState({ email: '', password: '' });
+  const [keepSignedIn, setKeepSignedIn] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  useEffect(() => {
+    getMe()
+      .then((res) => {
+        if (res?.success && res?.data?.role) {
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('stridera_user', JSON.stringify(res.data));
+          }
+          router.replace(getRedirectForRole(res.data.role));
+        }
+      })
+      .catch(() => {});
+  }, [router]);
 
   // Forgot password modal state (FR-1.7)
   const [showForgotModal, setShowForgotModal] = useState(false);
@@ -44,7 +58,7 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await login(email, password);
+      const data = await login(email, password, keepSignedIn);
       const user = data.data?.user;
       const token = data.data?.token;
       if (typeof window !== 'undefined') {
@@ -132,6 +146,15 @@ export default function LoginPage() {
                 autoComplete="current-password"
               />
             </div>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-4)', fontSize: 'var(--text-sm)', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={keepSignedIn}
+                onChange={e => setKeepSignedIn(e.target.checked)}
+              />
+              <span>Keep me signed in (30 days)</span>
+            </label>
             <button
               type="submit"
               className="btn btn-primary btn-lg btn-full"

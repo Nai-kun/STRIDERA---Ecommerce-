@@ -4,7 +4,19 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
 const { authenticate, requireSeller } = require('../middleware/auth.middleware');
+const { upload, saveValidatedProductImage, MAX_IMAGES_PER_PRODUCT } = require('../lib/imageUpload');
 const { body, validationResult } = require('express-validator');
+
+const HIGH_LOW_PERCENT = 0.20;
+const LOW_STOCK_THRESHOLD = 5;
+
+function getPeriodStart(period) {
+  const now = Date.now();
+  if (period === '7d') return new Date(now - 7 * 24 * 60 * 60 * 1000);
+  if (period === '90d') return new Date(now - 90 * 24 * 60 * 60 * 1000);
+  if (period === 'all') return null;
+  return new Date(now - 30 * 24 * 60 * 60 * 1000); // default 30d
+}
 
 router.use(authenticate, requireSeller);
 
@@ -200,6 +212,175 @@ router.get('/dashboard', async (req, res, next) => {
   }
 });
 
+// GET /api/seller/metrics?period=30d — Product & Variant Performance Metrics (REV-07, D8)
+router.get('/metrics', async (req, res, next) => {
+  try {
+    const sellerId = req.user.id;
+    const period = ['7d', '30d', '90d', 'all'].includes(req.query.period) ? req.query.period : '30d';
+    const periodStart = getPeriodStart(period);
+
+    const products = await prisma.product.findMany({
+      where: { sellerId },
+      include: {
+        images: { where: { isPrimary: true }, take: 1 },
+        variants: {
+          select: {
+            id: true,
+            variantSku: true,
+            size: true,
+            color: true,
+            stockQuantity: true,
+            isActive: true
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    // Count ONLY items from PAID or SHIPPED/DELIVERED orders (exclude PENDING and CANCELLED per D8)
+    const orderItems = await prisma.orderItem.findMany({
+      where: {
+        productVariant: { product: { sellerId } },
+        fulfillmentStatus: { not: 'CANCELLED' },
+        order: {
+          paymentStatus: 'PAID',
+          orderStatus: { not: 'CANCELLED' },
+          ...(periodStart ? { createdAt: { gte: periodStart } } : {})
+        }
+      },
+      include: {
+        productVariant: { select: { productId: true } },
+        order: { select: { id: true } }
+      }
+    });
+
+    const productStats = new Map();
+    const variantStats = new Map();
+
+    for (const p of products) {
+      productStats.set(p.id, {
+        productId: p.id,
+        name: p.name,
+        sku: p.sku,
+        status: p.status || (p.isActive ? 'ACTIVE' : 'ARCHIVED'),
+        isActive: p.isActive,
+        imageUrl: p.images[0]?.url || null,
+        unitsSold: 0,
+        revenueCentavos: 0,
+        orderIds: new Set(),
+        currentStock: p.variants.reduce((s, v) => s + v.stockQuantity, 0),
+        lowStockCount: p.variants.filter(v => v.isActive && v.stockQuantity <= LOW_STOCK_THRESHOLD).length
+      });
+    }
+
+    for (const item of orderItems) {
+      const pid = item.productVariant?.productId;
+      if (pid && productStats.has(pid)) {
+        const ps = productStats.get(pid);
+        ps.unitsSold += item.quantity;
+        ps.revenueCentavos += item.unitPriceCentavos * item.quantity;
+        ps.orderIds.add(item.orderId);
+      }
+
+      if (!variantStats.has(item.productVariantId)) {
+        variantStats.set(item.productVariantId, {
+          variantId: item.productVariantId,
+          productName: item.productName,
+          variantSku: item.variantSku,
+          size: item.size,
+          color: item.color,
+          unitsSold: 0,
+          revenueCentavos: 0,
+          orderIds: new Set()
+        });
+      }
+      const vs = variantStats.get(item.productVariantId);
+      vs.unitsSold += item.quantity;
+      vs.revenueCentavos += item.unitPriceCentavos * item.quantity;
+      vs.orderIds.add(item.orderId);
+    }
+
+    const activeProductsList = [...productStats.values()].filter(p => p.isActive && p.status === 'ACTIVE');
+    activeProductsList.sort((a, b) => b.unitsSold - a.unitsSold || b.revenueCentavos - a.revenueCentavos);
+
+    const applyBadges = activeProductsList.length >= 5;
+    const topCutoff = applyBadges ? Math.max(1, Math.ceil(activeProductsList.length * HIGH_LOW_PERCENT)) : 0;
+    const withSales = activeProductsList.filter(p => p.unitsSold > 0);
+    const lowCutoffCount = applyBadges ? Math.max(1, Math.ceil(activeProductsList.length * HIGH_LOW_PERCENT)) : 0;
+    const lowIds = new Set(
+      applyBadges ? withSales.slice(-lowCutoffCount).map(p => p.productId) : []
+    );
+    const highIds = new Set(
+      applyBadges ? withSales.slice(0, topCutoff).map(p => p.productId) : []
+    );
+
+    const rankedProducts = [...productStats.values()]
+      .sort((a, b) => b.unitsSold - a.unitsSold || b.revenueCentavos - a.revenueCentavos)
+      .map((p) => {
+        let performanceLabel = null;
+        if (p.unitsSold === 0) {
+          performanceLabel = 'NO_SALES';
+        } else if (applyBadges) {
+          if (highIds.has(p.productId)) performanceLabel = 'HIGH_SELLING';
+          else if (lowIds.has(p.productId)) performanceLabel = 'LOW_SELLING';
+        }
+        return {
+          productId: p.productId,
+          name: p.name,
+          sku: p.sku,
+          status: p.status,
+          isActive: p.isActive,
+          imageUrl: p.imageUrl,
+          unitsSold: p.unitsSold,
+          revenueCentavos: p.revenueCentavos,
+          revenueFormatted: `₱${(p.revenueCentavos / 100).toFixed(2)}`,
+          orderCount: p.orderIds.size,
+          currentStock: p.currentStock,
+          lowStockCount: p.lowStockCount,
+          performanceLabel
+        };
+      });
+
+    const totalRevenueCentavos = rankedProducts.reduce((s, p) => s + p.revenueCentavos, 0);
+    const totalUnitsSold = rankedProducts.reduce((s, p) => s + p.unitsSold, 0);
+    const distinctOrders = new Set(orderItems.map(i => i.orderId)).size;
+    const totalLowStock = rankedProducts.reduce((s, p) => s + p.lowStockCount, 0);
+
+    res.json({
+      success: true,
+      data: {
+        period,
+        timezone: 'Asia/Manila',
+        badgesApplied: applyBadges,
+        lowStockThreshold: LOW_STOCK_THRESHOLD,
+        summary: {
+          revenueCentavos: totalRevenueCentavos,
+          revenueFormatted: `₱${(totalRevenueCentavos / 100).toFixed(2)}`,
+          unitsSold: totalUnitsSold,
+          orderCount: distinctOrders,
+          lowStockCount: totalLowStock,
+          activeProductCount: activeProductsList.length
+        },
+        products: rankedProducts,
+        variants: [...variantStats.values()]
+          .sort((a, b) => b.unitsSold - a.unitsSold)
+          .map(v => ({
+            variantId: v.variantId,
+            productName: v.productName,
+            variantSku: v.variantSku,
+            size: v.size,
+            color: v.color,
+            unitsSold: v.unitsSold,
+            revenueCentavos: v.revenueCentavos,
+            orderCount: v.orderIds.size
+          }))
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ────────────────────────────────────────────────
 // 3. SELLER PRODUCT MANAGEMENT (FR-5.3 to FR-5.8)
 // ────────────────────────────────────────────────
@@ -283,7 +464,7 @@ router.post('/products', [
   body('categoryId').isUUID().withMessage('Valid category ID required'),
   body('basePriceCentavos').isInt({ min: 100 }).withMessage('Base price must be at least ₱1.00 (100 centavos)'),
   body('audience').isIn(['MEN', 'WOMEN', 'UNISEX']).withMessage('Valid audience required'),
-  body('shoeType').isIn(['RUNNING', 'LIFESTYLE', 'BASKETBALL', 'TRAINING', 'CASUAL', 'BOOTS']).withMessage('Valid shoe type required')
+  body('shoeType').isIn(['RUNNING', 'LIFESTYLE', 'BASKETBALL', 'TRAINING', 'CASUAL', 'BOOTS', 'FORMAL', 'LOAFERS']).withMessage('Valid shoe type required')
 ], async (req, res, next) => {
   try {
     const errors = validationResult(req);
@@ -356,8 +537,12 @@ router.put('/products/:id', async (req, res, next) => {
 
     const {
       name, categoryId, description, features, basePriceCentavos,
-      compareAtPriceCentavos, audience, shoeType, isActive
+      compareAtPriceCentavos, audience, shoeType, isActive, status
     } = req.body;
+
+    const resolvedStatus = status && ['ACTIVE', 'DRAFT', 'ARCHIVED'].includes(status)
+      ? status
+      : (isActive !== undefined ? (isActive ? 'ACTIVE' : 'ARCHIVED') : undefined);
 
     const updated = await prisma.product.update({
       where: { id: existing.id },
@@ -370,9 +555,10 @@ router.put('/products/:id', async (req, res, next) => {
         ...(compareAtPriceCentavos !== undefined && { compareAtPriceCentavos }),
         ...(audience && { audience }),
         ...(shoeType && { shoeType }),
-        ...(isActive !== undefined && { isActive })
+        ...(resolvedStatus && { status: resolvedStatus, isActive: resolvedStatus === 'ACTIVE' }),
+        ...(isActive !== undefined && !status && { isActive })
       },
-      include: { category: true, brand: true, variants: true }
+      include: { category: true, brand: true, variants: true, images: true }
     });
 
     await prisma.auditLog.create({
@@ -405,20 +591,125 @@ router.delete('/products/:id', async (req, res, next) => {
 
     await prisma.product.update({
       where: { id: existing.id },
-      data: { isActive: false }
+      data: { isActive: false, status: 'ARCHIVED' }
     });
 
     await prisma.auditLog.create({
       data: {
         userId: req.user.id,
-        action: 'SELLER_DEACTIVATE_PRODUCT',
+        action: 'SELLER_ARCHIVE_PRODUCT',
         entityType: 'Product',
         entityId: existing.id,
         ipAddress: req.ip
       }
     });
 
-    res.json({ success: true, message: 'Product deactivated' });
+    res.json({ success: true, message: 'Product archived' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/seller/products/:id/restore — Restore archived product
+router.patch('/products/:id/restore', async (req, res, next) => {
+  try {
+    const existing = await prisma.product.findFirst({
+      where: { id: req.params.id, sellerId: req.user.id }
+    });
+
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'Product not found' });
+    }
+
+    const updated = await prisma.product.update({
+      where: { id: existing.id },
+      data: { isActive: true, status: 'ACTIVE' }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        userId: req.user.id,
+        action: 'SELLER_RESTORE_PRODUCT',
+        entityType: 'Product',
+        entityId: existing.id,
+        ipAddress: req.ip
+      }
+    });
+
+    res.json({ success: true, message: 'Product restored', data: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/seller/products/:id/images — Upload validated PNG/JPG/WEBP image (<= 2MB, max 6 per product, D12)
+router.post('/products/:id/images', upload.single('image'), async (req, res, next) => {
+  try {
+    const product = await prisma.product.findFirst({
+      where: { id: req.params.id, sellerId: req.user.id },
+      include: { images: true }
+    });
+
+    if (!product) {
+      return res.status(404).json({ success: false, message: 'Product not found' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'Image file is required' });
+    }
+
+    if (product.images.length >= MAX_IMAGES_PER_PRODUCT) {
+      return res.status(400).json({
+        success: false,
+        message: `Maximum of ${MAX_IMAGES_PER_PRODUCT} images per product allowed`
+      });
+    }
+
+    const imageUrl = saveValidatedProductImage(req.file.buffer);
+    const isPrimary = product.images.length === 0 || req.body.isPrimary === 'true';
+
+    if (isPrimary) {
+      await prisma.productImage.updateMany({
+        where: { productId: product.id },
+        data: { isPrimary: false }
+      });
+    }
+
+    const image = await prisma.productImage.create({
+      data: {
+        productId: product.id,
+        url: imageUrl,
+        altText: req.body.altText || product.name,
+        sortOrder: product.images.length,
+        isPrimary
+      }
+    });
+
+    res.status(201).json({ success: true, data: image });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/seller/products/:id/images/:imageId — Remove product image
+router.delete('/products/:id/images/:imageId', async (req, res, next) => {
+  try {
+    const product = await prisma.product.findFirst({
+      where: { id: req.params.id, sellerId: req.user.id }
+    });
+    if (!product) {
+      return res.status(404).json({ success: false, message: 'Product not found' });
+    }
+
+    const img = await prisma.productImage.findFirst({
+      where: { id: req.params.imageId, productId: product.id }
+    });
+    if (!img) {
+      return res.status(404).json({ success: false, message: 'Image not found' });
+    }
+
+    await prisma.productImage.delete({ where: { id: img.id } });
+    res.json({ success: true, message: 'Image removed' });
   } catch (err) {
     next(err);
   }
@@ -749,11 +1040,19 @@ router.patch('/orders/:id/fulfill', [
 
     const sellerOrder = await prisma.sellerOrder.findFirst({
       where: { id: req.params.id, sellerId: req.user.id },
-      include: { order: true, shipments: true }
+      include: { order: true, shipments: true, items: true }
     });
 
     if (!sellerOrder) {
       return res.status(404).json({ success: false, message: 'Seller order slice not found' });
+    }
+
+    if (sellerOrder.order.paymentStatus !== 'PAID') {
+      return res.status(400).json({ success: false, message: 'Order must be PAID before marking items as shipped' });
+    }
+
+    if (sellerOrder.items.some(i => i.stockConflict)) {
+      return res.status(409).json({ success: false, message: 'Cannot ship slice with unresolved stock conflict' });
     }
 
     if (sellerOrder.status === 'SHIPPED' || sellerOrder.status === 'DELIVERED') {
@@ -783,6 +1082,11 @@ router.patch('/orders/:id/fulfill', [
           acceptedAt: sellerOrder.acceptedAt || now,
           shippedAt: now
         }
+      });
+
+      await tx.orderItem.updateMany({
+        where: { sellerOrderId: sellerOrder.id, fulfillmentStatus: { not: 'CANCELLED' } },
+        data: { fulfillmentStatus: 'SHIPPED', shippedAt: now }
       });
 
       if (sellerOrder.shipments.length > 0) {
@@ -909,24 +1213,32 @@ router.patch('/orders/:id/cancel', [
         }
       });
 
-      for (const item of sellerOrder.items) {
-        await tx.productVariant.update({
-          where: { id: item.productVariantId },
-          data: { stockQuantity: { increment: item.quantity } }
-        });
+      await tx.orderItem.updateMany({
+        where: { sellerOrderId: sellerOrder.id },
+        data: { fulfillmentStatus: 'CANCELLED' }
+      });
 
-        const afterVariant = await tx.productVariant.findUnique({ where: { id: item.productVariantId } });
+      if (sellerOrder.order.stockDecremented) {
+        for (const item of sellerOrder.items) {
+          if (item.stockConflict) continue;
+          await tx.productVariant.update({
+            where: { id: item.productVariantId },
+            data: { stockQuantity: { increment: item.quantity } }
+          });
 
-        await tx.stockMovement.create({
-          data: {
-            productVariantId: item.productVariantId,
-            quantityChange: item.quantity,
-            stockAfter: afterVariant.stockQuantity,
-            movementType: 'INCOMING',
-            reason: `SELLER_CANCEL_RESTORE: ${reason.toUpperCase().replace(/\s+/g, '_')}`,
-            referenceId: req.user.id
-          }
-        });
+          const afterVariant = await tx.productVariant.findUnique({ where: { id: item.productVariantId } });
+
+          await tx.stockMovement.create({
+            data: {
+              productVariantId: item.productVariantId,
+              quantityChange: item.quantity,
+              stockAfter: afterVariant.stockQuantity,
+              movementType: 'INCOMING',
+              reason: `SELLER_CANCEL_RESTORE: ${reason.toUpperCase().replace(/\s+/g, '_')}`,
+              referenceId: req.user.id
+            }
+          });
+        }
       }
 
       await tx.auditLog.create({

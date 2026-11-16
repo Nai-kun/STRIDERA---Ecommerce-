@@ -4,7 +4,12 @@ const router = express.Router();
 const argon2 = require('argon2');
 const { body, validationResult } = require('express-validator');
 const prisma = require('../lib/prisma');
-const { authenticate, generateToken, setTokenCookie } = require('../middleware/auth.middleware');
+const {
+  authenticate,
+  optionalAuth,
+  issuePersistentSession,
+  clearPersistentSession
+} = require('../middleware/auth.middleware');
 const { createError } = require('../middleware/error.middleware');
 const rateLimit = require('express-rate-limit');
 
@@ -43,8 +48,7 @@ router.post('/register', [
       select: { id: true, email: true, firstName: true, lastName: true, role: true, accountStatus: true },
     });
 
-    const token = generateToken(user.id);
-    setTokenCookie(res, token);
+    const { jwtToken: token } = await issuePersistentSession(res, user.id, true);
 
     res.status(201).json({
       success: true,
@@ -123,8 +127,7 @@ router.post('/register-seller', [
       }
     });
 
-    const token = generateToken(user.id);
-    setTokenCookie(res, token);
+    const { jwtToken: token } = await issuePersistentSession(res, user.id, true);
 
     res.status(201).json({
       success: true,
@@ -147,7 +150,7 @@ router.post('/login', loginLimiter, [
       return res.status(400).json({ success: false, error: { message: 'Validation failed', details: errors.array() } });
     }
 
-    const { email, password } = req.body;
+    const { email, password, keepSignedIn = true } = req.body;
 
     const user = await prisma.user.findUnique({
       where: { email },
@@ -181,8 +184,7 @@ router.post('/login', loginLimiter, [
       throw createError('Invalid email or password', 401);
     }
 
-    const token = generateToken(user.id);
-    setTokenCookie(res, token);
+    const { jwtToken: token } = await issuePersistentSession(res, user.id, keepSignedIn !== false);
 
     const { passwordHash, ...userData } = user;
     res.json({
@@ -194,9 +196,9 @@ router.post('/login', loginLimiter, [
   }
 });
 
-// POST /api/auth/logout — User Logout (FR-1.8)
-router.post('/logout', (req, res) => {
-  res.clearCookie('token');
+// POST /api/auth/logout — User Logout (FR-1.8, D4)
+router.post('/logout', optionalAuth, async (req, res) => {
+  await clearPersistentSession(res, req.user?.id || null);
   res.json({ success: true, message: 'Logged out' });
 });
 
@@ -270,8 +272,10 @@ router.put('/password', authenticate, [
     const passwordHash = await argon2.hash(newPassword);
     await prisma.user.update({
       where: { id: req.user.id },
-      data: { passwordHash },
+      data: { passwordHash, sessionTokenHash: null, sessionExpiresAt: null },
     });
+    res.clearCookie('token');
+    res.clearCookie('stridera_session');
 
     await prisma.auditLog.create({
       data: {
@@ -307,7 +311,7 @@ router.post('/forgot-password', [
       const passwordHash = await argon2.hash(newPassword);
       await prisma.user.update({
         where: { id: user.id },
-        data: { passwordHash },
+        data: { passwordHash, sessionTokenHash: null, sessionExpiresAt: null },
       });
       await prisma.auditLog.create({
         data: {

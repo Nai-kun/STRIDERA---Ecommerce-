@@ -23,25 +23,17 @@ async function start(options = {}) {
     }
   }
 
-  const db = new PGlite(dbDir);
-
+  // Start clean if reset requested
   if (options.resetNewTables) {
-    await db.exec(`
-      DROP TABLE IF EXISTS support_messages, support_tickets, seller_payouts, product_reviews, platform_configs CASCADE;
-      DROP TYPE IF EXISTS "TicketCategory", "TicketStatus", "RefundStatus", "PayoutStatus" CASCADE;
-    `);
-  }
-
-  // Ensure Migration 003 (7 Roles & Enterprise Portals) is applied idempotently
-  const migration003Path = path.join(__dirname, '../database/migrations/003_seven_roles_and_enterprise_portals.sql');
-  if (fs.existsSync(migration003Path)) {
     try {
-      const sql = fs.readFileSync(migration003Path, 'utf8');
-      await db.exec(sql);
-    } catch (migErr) {
-      console.warn('Migration 003 check:', migErr.message);
+      fs.rmSync(dbDir, { recursive: true, force: true });
+      fs.mkdirSync(dbDir, { recursive: true });
+    } catch (e) {
+      console.warn('Could not reset dbDir:', e.message);
     }
   }
+
+  const db = new PGlite(dbDir);
 
   const server = new PGLiteSocketServer({
     db,

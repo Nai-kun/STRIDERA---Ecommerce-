@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import HeaderAuthActions from '../../components/HeaderAuthActions';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
 
@@ -51,11 +52,12 @@ function ShopPageContent() {
       params.set('limit', '12');
 
       const res = await fetch(`${API}/products?${params}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setProducts(data.data?.products || data.data || []);
       setPagination(data.data?.pagination || data.pagination || { page: 1, totalPages: 1, total: 0 });
     } catch (e) {
-      console.error('Failed to load products', e);
+      console.warn('Unable to reach backend API:', e?.message || e);
       setProducts([]);
     } finally {
       setLoading(false);
@@ -103,7 +105,7 @@ function ShopPageContent() {
             <Link href="/brands" className="btn btn-ghost btn-sm">Brands</Link>
             <Link href="/checkout" className="btn btn-outline btn-sm">Checkout</Link>
             <Link href="/account/orders" className="btn btn-ghost btn-sm">My Orders</Link>
-            <Link href="/account/login" className="btn btn-primary btn-sm">Sign In / Portals</Link>
+            <HeaderAuthActions />
           </div>
         </div>
       </header>

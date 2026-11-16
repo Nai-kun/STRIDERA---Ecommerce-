@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { getCart, updateCartItem, removeCartItem } from '../../lib/api';
+import HeaderAuthActions from '../../components/HeaderAuthActions';
 
 export default function CartPage() {
   const [cart, setCart] = useState(null);
@@ -120,6 +121,7 @@ export default function CartPage() {
           </Link>
           <div style={{ display: 'flex', gap: 'var(--space-4)', alignItems: 'center' }}>
             <Link href="/shop" className="btn btn-ghost btn-sm">Continue Shopping</Link>
+            <HeaderAuthActions />
           </div>
         </div>
       </header>

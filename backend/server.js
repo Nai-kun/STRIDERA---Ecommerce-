@@ -32,9 +32,11 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
-// CORS
+// CORS — allow localhost, 127.0.0.1, and configured FRONTEND_URL
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: process.env.NODE_ENV === 'production'
+    ? (process.env.FRONTEND_URL || 'http://localhost:3000')
+    : true,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token']
@@ -56,8 +58,9 @@ if (process.env.NODE_ENV !== 'test') {
   app.use(morgan('dev'));
 }
 
-// Static files for product images
+// Static files for product images & uploads
 app.use('/assets', express.static(path.join(__dirname, 'public/assets')));
+app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
 
 // API Routes
 app.use('/api/auth', authRoutes);

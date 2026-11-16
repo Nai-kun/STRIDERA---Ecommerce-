@@ -28,7 +28,18 @@ router.get('/', optionalAuth, async (req, res, next) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const take = Math.min(parseInt(limit), 48);
 
-    const where = { isActive: true };
+    const where = {
+      isActive: true,
+      status: 'ACTIVE',
+      AND: [
+        {
+          OR: [
+            { sellerId: null },
+            { seller: { sellerStatus: 'APPROVED', accountStatus: 'ACTIVE', isActive: true } }
+          ]
+        }
+      ]
+    };
 
     if (category) {
       where.category = { slug: category };
@@ -46,12 +57,14 @@ router.get('/', optionalAuth, async (req, res, next) => {
       where.shoeType = shoeType.toUpperCase();
     }
     if (search) {
-      where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { description: { contains: search, mode: 'insensitive' } },
-        { sku: { contains: search, mode: 'insensitive' } },
-        { seller: { storeName: { contains: search, mode: 'insensitive' } } },
-      ];
+      where.AND.push({
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { description: { contains: search, mode: 'insensitive' } },
+          { sku: { contains: search, mode: 'insensitive' } },
+          { seller: { storeName: { contains: search, mode: 'insensitive' } } },
+        ]
+      });
     }
     if (minPrice || maxPrice) {
       where.basePriceCentavos = {};

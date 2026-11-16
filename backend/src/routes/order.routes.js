@@ -76,7 +76,7 @@ router.post('/', [
           include: { product: true }
         });
 
-        if (!variant || !variant.isActive || !variant.product.isActive) {
+        if (!variant || !variant.isActive || !variant.product.isActive || variant.product.status === 'ARCHIVED') {
           throw createError(`Product "${variant?.product?.name || 'Unknown'}" is no longer available`, 400);
         }
 
@@ -102,27 +102,7 @@ router.post('/', [
           lineTotalCentavos,
           _sellerId: variant.product.sellerId || null
         });
-
-        // Atomic stock decrement (FR-6.4)
-        const updated = await tx.productVariant.updateMany({
-          where: { id: variant.id, stockQuantity: { gte: item.quantity } },
-          data: { stockQuantity: { decrement: item.quantity } }
-        });
-
-        if (updated.count === 0) {
-          throw createError(`Race condition: stock depleted for ${variant.product.name}`, 409);
-        }
-
-        const afterVariant = await tx.productVariant.findUnique({ where: { id: variant.id } });
-        await tx.stockMovement.create({
-          data: {
-            productVariantId: variant.id,
-            quantityChange: -item.quantity,
-            stockAfter: afterVariant.stockQuantity,
-            movementType: 'OUTGOING',
-            reason: 'ORDER_PLACED'
-          }
-        });
+        // Note (D9): Stock is validated here at checkout and atomically decremented inside finalizePayment() upon payment confirmation.
       }
 
       let discountTotalCentavos = 0;
@@ -450,23 +430,33 @@ router.patch('/:orderNumber/cancel', authenticate, async (req, res, next) => {
     }
 
     await prisma.$transaction(async (tx) => {
-      for (const item of order.items) {
-        await tx.productVariant.update({
-          where: { id: item.productVariantId },
-          data: { stockQuantity: { increment: item.quantity } }
-        });
+      // Restore stock only if it was already decremented upon payment (D9)
+      if (order.stockDecremented) {
+        for (const item of order.items) {
+          if (item.fulfillmentStatus === 'CANCELLED' || item.stockConflict) continue;
+          await tx.productVariant.update({
+            where: { id: item.productVariantId },
+            data: { stockQuantity: { increment: item.quantity } }
+          });
 
-        const variant = await tx.productVariant.findUnique({ where: { id: item.productVariantId } });
-        await tx.stockMovement.create({
-          data: {
-            productVariantId: item.productVariantId,
-            quantityChange: item.quantity,
-            stockAfter: variant.stockQuantity,
-            movementType: 'INCOMING',
-            reason: 'ORDER_CANCELLED'
-          }
-        });
+          const variant = await tx.productVariant.findUnique({ where: { id: item.productVariantId } });
+          await tx.stockMovement.create({
+            data: {
+              productVariantId: item.productVariantId,
+              quantityChange: item.quantity,
+              stockAfter: variant.stockQuantity,
+              movementType: 'INCOMING',
+              reason: 'ORDER_CANCELLED',
+              referenceId: order.orderNumber
+            }
+          });
+        }
       }
+
+      await tx.orderItem.updateMany({
+        where: { orderId: order.id },
+        data: { fulfillmentStatus: 'CANCELLED' }
+      });
 
       await tx.order.update({
         where: { id: order.id },
@@ -482,7 +472,7 @@ router.patch('/:orderNumber/cancel', authenticate, async (req, res, next) => {
       });
     });
 
-    res.json({ success: true, message: 'Order cancelled and stock restored' });
+    res.json({ success: true, message: order.stockDecremented ? 'Order cancelled and stock restored' : 'Order cancelled' });
   } catch (err) {
     next(err);
   }
