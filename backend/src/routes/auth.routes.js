@@ -26,7 +26,10 @@ router.post('/register', [
   body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
   body('firstName').trim().notEmpty().withMessage('First name required'),
   body('lastName').trim().notEmpty().withMessage('Last name required'),
-  body('phone').optional().trim(),
+  body('phone')
+    .trim()
+    .matches(/^\+63 9\d{2}-\d{3}-\d{4}$/)
+    .withMessage('Mobile number must be in Philippine international format: +63 9XX-XXX-YYYY (e.g. +63 917-123-4567)'),
 ], async (req, res, next) => {
   try {
     const errors = validationResult(req);
@@ -69,7 +72,10 @@ router.post('/register-seller', [
   body('storeDescription').optional().trim(),
   body('storeLogoUrl').optional().trim(),
   body('identificationDetails').optional().trim(),
-  body('phone').optional().trim(),
+  body('phone')
+    .trim()
+    .matches(/^\+63 9\d{2}-\d{3}-\d{4}$/)
+    .withMessage('Mobile number must be in Philippine international format: +63 9XX-XXX-YYYY (e.g. +63 917-123-4567)'),
 ], async (req, res, next) => {
   try {
     const errors = validationResult(req);

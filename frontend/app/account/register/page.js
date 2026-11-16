@@ -8,14 +8,31 @@ const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
 
 export default function RegisterPage() {
   const router = useRouter();
-  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', phone: '', password: '', confirmPassword: '' });
+  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', phone: '+63 ', password: '', confirmPassword: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   const setField = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
+  const PH_MOBILE_REGEX = /^\+63 9\d{2}-\d{3}-\d{4}$/;
+
+  const formatPhMobile = (raw) => {
+    let digits = raw.replace(/\D/g, '');
+    if (digits.startsWith('63')) digits = digits.slice(2);
+    else if (digits.startsWith('0')) digits = digits.slice(1);
+    digits = digits.slice(0, 10);
+    let formatted = digits.slice(0, 3);
+    if (digits.length > 3) formatted += '-' + digits.slice(3, 6);
+    if (digits.length > 6) formatted += '-' + digits.slice(6, 10);
+    return '+63 ' + formatted;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!PH_MOBILE_REGEX.test(form.phone)) {
+      setError('Mobile number must be in Philippine international format: +63 9XX-XXX-YYYY (e.g. +63 917-123-4567)');
+      return;
+    }
     if (form.password !== form.confirmPassword) {
       setError('Passwords do not match');
       return;
@@ -30,7 +47,14 @@ export default function RegisterPage() {
         body: JSON.stringify({ firstName: form.firstName, lastName: form.lastName, email: form.email, phone: form.phone, password: form.password })
       });
       const data = await res.json();
-      if (!data.success) throw new Error(data.message || 'Registration failed');
+      if (!data.success) {
+        const detailMsg = data.error?.details?.[0]?.msg;
+        throw new Error(detailMsg || data.error?.message || data.message || 'Registration failed');
+      }
+      if (typeof window !== 'undefined') {
+        if (data.data?.token) localStorage.setItem('stridera_token', data.data.token);
+        if (data.data?.user) localStorage.setItem('stridera_user', JSON.stringify(data.data.user));
+      }
       router.push('/');
     } catch (e) {
       setError(e.message);
@@ -76,8 +100,27 @@ export default function RegisterPage() {
             <input id="reg-email" type="email" className="form-input" value={form.email} onChange={e => setField('email', e.target.value)} required autoComplete="email" />
           </div>
           <div className="form-group">
-            <label className="form-label" htmlFor="reg-phone">Phone Number</label>
-            <input id="reg-phone" type="tel" className="form-input" placeholder="+63 9XX XXX XXXX" value={form.phone} onChange={e => setField('phone', e.target.value)} />
+            <label className="form-label" htmlFor="reg-phone">Mobile Number (PH International) *</label>
+            <input
+              id="reg-phone"
+              type="tel"
+              inputMode="numeric"
+              maxLength={16}
+              pattern="^\+63 9\d{2}-\d{3}-\d{4}$"
+              required
+              className="form-input"
+              placeholder="+63 917-123-4567"
+              value={form.phone}
+              onKeyDown={e => {
+                if ((e.key === 'Backspace' || e.key === 'Delete') && (e.currentTarget.selectionStart ?? 0) <= 4 && (e.currentTarget.selectionEnd ?? 0) <= 4) {
+                  e.preventDefault();
+                }
+              }}
+              onChange={e => setField('phone', formatPhMobile(e.target.value))}
+            />
+            <span className="form-error" style={{ color: form.phone.length > 4 && !PH_MOBILE_REGEX.test(form.phone) ? 'var(--color-error)' : 'var(--color-text-subtle)' }}>
+              Format: +63 9XX-XXX-YYYY (12 digits, e.g. +63 917-123-4567) — {form.phone.replace(/\D/g, '').length}/12 digits
+            </span>
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="reg-password">Password *</label>
@@ -92,7 +135,7 @@ export default function RegisterPage() {
           <button
             type="submit"
             className="btn btn-primary btn-lg btn-full"
-            disabled={loading || !form.firstName || !form.email || !form.password || !form.confirmPassword}
+            disabled={loading || !form.firstName || !form.email || !PH_MOBILE_REGEX.test(form.phone) || !form.password || !form.confirmPassword}
             id="register-submit-btn"
           >
             {loading ? 'Creating account…' : 'Create Account'}

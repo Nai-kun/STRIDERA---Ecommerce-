@@ -13,7 +13,7 @@ export default function SellerRegisterPage() {
     firstName: '',
     lastName: '',
     email: '',
-    phone: '',
+    phone: '+63 ',
     password: '',
     confirmPassword: ''
   });
@@ -21,9 +21,27 @@ export default function SellerRegisterPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  const PH_MOBILE_REGEX = /^\+63 9\d{2}-\d{3}-\d{4}$/;
+
+  const formatPhMobile = (raw) => {
+    let digits = raw.replace(/\D/g, '');
+    if (digits.startsWith('63')) digits = digits.slice(2);
+    else if (digits.startsWith('0')) digits = digits.slice(1);
+    digits = digits.slice(0, 10);
+    let formatted = digits.slice(0, 3);
+    if (digits.length > 3) formatted += '-' + digits.slice(3, 6);
+    if (digits.length > 6) formatted += '-' + digits.slice(6, 10);
+    return '+63 ' + formatted;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
+
+    if (!PH_MOBILE_REGEX.test(form.phone)) {
+      setError('Contact mobile number must be in Philippine international format: +63 9XX-XXX-YYYY (e.g. +63 917-123-4567)');
+      return;
+    }
 
     if (form.password !== form.confirmPassword) {
       setError('Passwords do not match');
@@ -208,15 +226,26 @@ export default function SellerRegisterPage() {
                     />
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Contact Phone *</label>
+                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Contact Mobile (+63 9XX-XXX-YYYY) *</label>
                     <input
                       type="tel"
+                      inputMode="numeric"
+                      maxLength={16}
+                      pattern="^\+63 9\d{2}-\d{3}-\d{4}$"
                       required
-                      placeholder="+63 917 123 4567"
+                      placeholder="+63 917-123-4567"
                       value={form.phone}
-                      onChange={e => setForm({ ...form, phone: e.target.value })}
+                      onKeyDown={e => {
+                        if ((e.key === 'Backspace' || e.key === 'Delete') && (e.currentTarget.selectionStart ?? 0) <= 4 && (e.currentTarget.selectionEnd ?? 0) <= 4) {
+                          e.preventDefault();
+                        }
+                      }}
+                      onChange={e => setForm({ ...form, phone: formatPhMobile(e.target.value) })}
                       className="form-input"
                     />
+                    <span style={{ fontSize: '11px', color: form.phone.length > 4 && !PH_MOBILE_REGEX.test(form.phone) ? 'var(--color-error)' : 'var(--color-text-muted)' }}>
+                      {form.phone.replace(/\D/g, '').length}/12 digits (Format: +63 9XX-XXX-YYYY)
+                    </span>
                   </div>
                 </div>
 
