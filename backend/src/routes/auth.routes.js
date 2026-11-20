@@ -22,10 +22,29 @@ const loginLimiter = rateLimit({
 
 // POST /api/auth/register — Shopper Registration (FR-1.1)
 router.post('/register', [
-  body('email').isEmail().normalizeEmail().withMessage('Valid email required'),
+  body('email')
+    .trim()
+    .isEmail()
+    .withMessage('Valid email required')
+    .custom(val => {
+      if (!val.toLowerCase().endsWith('@gmail.com')) {
+        throw new Error('Only @gmail.com email addresses are accepted');
+      }
+      return true;
+    }),
   body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
-  body('firstName').trim().notEmpty().withMessage('First name required'),
-  body('lastName').trim().notEmpty().withMessage('Last name required'),
+  body('firstName')
+    .trim()
+    .notEmpty()
+    .withMessage('First name required')
+    .matches(/^[A-Za-z\s\-'.]+$/)
+    .withMessage('First name must contain only letters'),
+  body('lastName')
+    .trim()
+    .notEmpty()
+    .withMessage('Last name required')
+    .matches(/^[A-Za-z\s\-'.]+$/)
+    .withMessage('Last name must contain only letters'),
   body('phone')
     .trim()
     .matches(/^\+63 9\d{2}-\d{3}-\d{4}$/)
@@ -64,10 +83,29 @@ router.post('/register', [
 
 // POST /api/auth/register-seller — Seller Registration & Verification Request (FR-5.1, FR-5.2)
 router.post('/register-seller', [
-  body('email').isEmail().normalizeEmail().withMessage('Valid email required'),
+  body('email')
+    .trim()
+    .isEmail()
+    .withMessage('Valid email required')
+    .custom(val => {
+      if (!val.toLowerCase().endsWith('@gmail.com')) {
+        throw new Error('Only @gmail.com email addresses are accepted');
+      }
+      return true;
+    }),
   body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
-  body('firstName').trim().notEmpty().withMessage('First name required'),
-  body('lastName').trim().notEmpty().withMessage('Last name required'),
+  body('firstName')
+    .trim()
+    .notEmpty()
+    .withMessage('First name required')
+    .matches(/^[A-Za-z\s\-'.]+$/)
+    .withMessage('First name must contain only letters'),
+  body('lastName')
+    .trim()
+    .notEmpty()
+    .withMessage('Last name required')
+    .matches(/^[A-Za-z\s\-'.]+$/)
+    .withMessage('Last name must contain only letters'),
   body('storeName').trim().notEmpty().withMessage('Store name required'),
   body('storeDescription').optional().trim(),
   body('storeLogoUrl').optional().trim(),

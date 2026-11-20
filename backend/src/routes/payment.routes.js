@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
-const { authenticate, isAdmin } = require('../middleware/auth.middleware');
+const { authenticate, optionalAuth, isAdmin } = require('../middleware/auth.middleware');
 const { createError } = require('../middleware/error.middleware');
 const { finalizePayment } = require('../lib/paymentFinalizer');
 const { v4: uuidv4 } = require('uuid');
@@ -39,7 +39,7 @@ async function paymongoRequest(endpoint, method = 'GET', body = null) {
 }
 
 // POST /api/payments/create-session — Create an E-Wallet Checkout Session (GCash, Maya, PayPal) (FR-4.1 to FR-4.5)
-router.post('/create-session', authenticate, async (req, res, next) => {
+router.post('/create-session', optionalAuth, async (req, res, next) => {
   try {
     const { orderNumber, paymentMethod: rawMethod } = req.body;
 
@@ -53,7 +53,7 @@ router.post('/create-session', authenticate, async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    if (order.userId !== req.user.id && req.user.role !== 'ADMIN') {
+    if (order.userId && req.user && order.userId !== req.user.id && req.user.role !== 'ADMIN') {
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
@@ -203,7 +203,7 @@ router.post('/create-session', authenticate, async (req, res, next) => {
 });
 
 // POST /api/payments/confirm-sandbox — Confirm E-Wallet Sandbox Payment (FR-4.4, FR-4.6, FR-4.8, FR-4.10)
-router.post('/confirm-sandbox', authenticate, async (req, res, next) => {
+router.post('/confirm-sandbox', optionalAuth, async (req, res, next) => {
   try {
     const { orderNumber, paymentId, paymentMethod: rawMethod } = req.body;
 
@@ -216,7 +216,7 @@ router.post('/confirm-sandbox', authenticate, async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    if (order.userId !== req.user.id && req.user.role !== 'ADMIN') {
+    if (order.userId && req.user && order.userId !== req.user.id && req.user.role !== 'ADMIN') {
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
 

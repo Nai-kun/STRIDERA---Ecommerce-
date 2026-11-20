@@ -29,10 +29,23 @@ export default function CheckoutPage() {
   const [paymentFailedMsg, setPaymentFailedMsg] = useState(null);
 
   const [form, setForm] = useState({
-    firstName: '', lastName: '', email: '', phone: '',
+    firstName: '', lastName: '', email: '', phone: '+63 ',
     addressLine1: '', addressLine2: '', city: '', province: '', postalCode: '',
     notes: '', promotionCode: '', paymentMethod: 'gcash'
   });
+
+  const PH_MOBILE_REGEX = /^\+63 9\d{2}-\d{3}-\d{4}$/;
+
+  const formatPhMobile = (raw) => {
+    let digits = raw.replace(/\D/g, '');
+    if (digits.startsWith('63')) digits = digits.slice(2);
+    else if (digits.startsWith('0')) digits = digits.slice(1);
+    digits = digits.slice(0, 10);
+    let formatted = digits.slice(0, 3);
+    if (digits.length > 3) formatted += '-' + digits.slice(3, 6);
+    if (digits.length > 6) formatted += '-' + digits.slice(6, 10);
+    return '+63 ' + formatted;
+  };
 
   useEffect(() => {
     getMe()
@@ -218,25 +231,65 @@ export default function CheckoutPage() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
               <div className="form-group">
                 <label className="form-label" htmlFor="firstName">First Name *</label>
-                <input id="firstName" className="form-input" value={form.firstName} onChange={e => setField('firstName', e.target.value)} required />
+                <input id="firstName" className="form-input" placeholder="e.g. Juan" value={form.firstName} onChange={e => setField('firstName', e.target.value)} required />
               </div>
               <div className="form-group">
                 <label className="form-label" htmlFor="lastName">Last Name *</label>
-                <input id="lastName" className="form-input" value={form.lastName} onChange={e => setField('lastName', e.target.value)} required />
+                <input id="lastName" className="form-input" placeholder="e.g. Dela Cruz" value={form.lastName} onChange={e => setField('lastName', e.target.value)} required />
               </div>
             </div>
             <div className="form-group">
-              <label className="form-label" htmlFor="email">Email Address *</label>
-              <input id="email" type="email" className="form-input" value={form.email} onChange={e => setField('email', e.target.value)} required />
+              <label className="form-label" htmlFor="email">Email Address (@gmail.com) *</label>
+              <input id="email" type="email" className="form-input" placeholder="e.g. juan.delacruz@gmail.com" value={form.email} onChange={e => setField('email', e.target.value)} required />
+              {form.email && !form.email.trim().toLowerCase().endsWith('@gmail.com') && (
+                <span className="form-error" style={{ color: 'var(--color-error)' }}>Must be a valid @gmail.com address</span>
+              )}
             </div>
             <div className="form-group">
-              <label className="form-label" htmlFor="phone">Mobile Number *</label>
-              <input id="phone" type="tel" className="form-input" placeholder="+63 917 123 4567" value={form.phone} onChange={e => setField('phone', e.target.value)} required />
+              <label className="form-label" htmlFor="phone">Mobile Number (PH International) *</label>
+              <input
+                id="phone"
+                type="tel"
+                inputMode="numeric"
+                maxLength={16}
+                className="form-input"
+                placeholder="+63 917-123-4567"
+                value={form.phone}
+                onKeyDown={e => {
+                  if ((e.key === 'Backspace' || e.key === 'Delete') && (e.currentTarget.selectionStart ?? 0) <= 4 && (e.currentTarget.selectionEnd ?? 0) <= 4) {
+                    e.preventDefault();
+                  }
+                }}
+                onChange={e => setField('phone', formatPhMobile(e.target.value))}
+                required
+              />
+              <span className="form-error" style={{ color: form.phone.length > 4 && !PH_MOBILE_REGEX.test(form.phone) ? 'var(--color-error)' : 'var(--color-text-subtle)' }}>
+                Format: +63 9XX-XXX-YYYY (e.g. +63 917-123-4567)
+              </span>
             </div>
             <button
               className="btn btn-primary btn-lg btn-full"
-              onClick={() => setStep(1)}
-              disabled={!form.firstName || !form.lastName || !form.email || !form.phone}
+              onClick={() => {
+                setError(null);
+                if (!/^[A-Za-z\s\-'.]+$/.test(form.firstName.trim())) {
+                  setError('First name must contain only letters');
+                  return;
+                }
+                if (!/^[A-Za-z\s\-'.]+$/.test(form.lastName.trim())) {
+                  setError('Last name must contain only letters');
+                  return;
+                }
+                if (!form.email.trim().toLowerCase().endsWith('@gmail.com')) {
+                  setError('Email must be an @gmail.com address');
+                  return;
+                }
+                if (!PH_MOBILE_REGEX.test(form.phone)) {
+                  setError('Phone must be a valid Philippine mobile number (+63 9XX-XXX-YYYY)');
+                  return;
+                }
+                setStep(1);
+              }}
+              disabled={!form.firstName || !form.lastName || !form.email || !PH_MOBILE_REGEX.test(form.phone)}
             >
               Continue to Shipping
             </button>
@@ -266,8 +319,21 @@ export default function CheckoutPage() {
               </div>
             </div>
             <div className="form-group">
-              <label className="form-label" htmlFor="postalCode">Postal Code *</label>
-              <input id="postalCode" className="form-input" placeholder="e.g. 1200" value={form.postalCode} onChange={e => setField('postalCode', e.target.value)} required />
+              <label className="form-label" htmlFor="postalCode">Postal Code (4 Digits) *</label>
+              <input
+                id="postalCode"
+                type="text"
+                inputMode="numeric"
+                maxLength={4}
+                className="form-input"
+                placeholder="e.g. 1000, 1200"
+                value={form.postalCode}
+                onChange={e => setField('postalCode', e.target.value.replace(/\D/g, '').slice(0, 4))}
+                required
+              />
+              <span className="form-error" style={{ color: form.postalCode && form.postalCode.length !== 4 ? 'var(--color-error)' : 'var(--color-text-subtle)' }}>
+                Philippine postal code must be exactly 4 digits
+              </span>
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor="promoCode">Promo Code (Try STRIDE10 or LAUNCH500)</label>
@@ -282,8 +348,15 @@ export default function CheckoutPage() {
               <button
                 className="btn btn-primary btn-lg"
                 style={{ flex: 1 }}
-                onClick={() => setStep(2)}
-                disabled={!form.addressLine1 || !form.city || !form.province || !form.postalCode}
+                onClick={() => {
+                  setError(null);
+                  if (!/^\d{4}$/.test(form.postalCode)) {
+                    setError('Postal code must be exactly 4 digits');
+                    return;
+                  }
+                  setStep(2);
+                }}
+                disabled={!form.addressLine1 || !form.city || !form.province || form.postalCode.length !== 4}
               >
                 Continue to Payment Method
               </button>

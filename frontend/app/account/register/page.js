@@ -29,6 +29,18 @@ export default function RegisterPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!/^[A-Za-z\s\-'.]+$/.test(form.firstName.trim())) {
+      setError('First name must contain only letters');
+      return;
+    }
+    if (!/^[A-Za-z\s\-'.]+$/.test(form.lastName.trim())) {
+      setError('Last name must contain only letters');
+      return;
+    }
+    if (!form.email.trim().toLowerCase().endsWith('@gmail.com')) {
+      setError('Email address must end with @gmail.com');
+      return;
+    }
     if (!PH_MOBILE_REGEX.test(form.phone)) {
       setError('Mobile number must be in Philippine international format: +63 9XX-XXX-YYYY (e.g. +63 917-123-4567)');
       return;

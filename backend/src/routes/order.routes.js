@@ -19,13 +19,38 @@ function generateOrderNumber() {
 // POST /api/orders — Create order from cart (checkout)
 router.post('/', [
   optionalAuth,
-  body('shippingFullName').trim().notEmpty().withMessage('Full name required'),
-  body('shippingPhone').trim().notEmpty().withMessage('Phone required'),
+  body('shippingFullName')
+    .trim()
+    .notEmpty()
+    .withMessage('Full name required')
+    .matches(/^[A-Za-z\s\-'.]+$/)
+    .withMessage('Full name must contain only letters'),
+  body('shippingPhone')
+    .trim()
+    .notEmpty()
+    .withMessage('Phone required')
+    .matches(/^\+63 9\d{2}-\d{3}-\d{4}$/)
+    .withMessage('Mobile number must be in Philippine international format: +63 9XX-XXX-YYYY (e.g. +63 917-123-4567)'),
   body('shippingAddressLine1').trim().notEmpty().withMessage('Address line 1 required'),
   body('shippingCity').trim().notEmpty().withMessage('City required'),
   body('shippingProvince').trim().notEmpty().withMessage('Province required'),
-  body('shippingPostalCode').trim().notEmpty().withMessage('Postal code required'),
-  body('guestEmail').optional().isEmail().withMessage('Valid email required'),
+  body('shippingPostalCode')
+    .trim()
+    .notEmpty()
+    .withMessage('Postal code required')
+    .matches(/^\d{4}$/)
+    .withMessage('Philippine postal code must be 4 digits (e.g. 1000, 1200)'),
+  body('guestEmail')
+    .optional()
+    .trim()
+    .isEmail()
+    .withMessage('Valid email required')
+    .custom(val => {
+      if (val && !val.toLowerCase().endsWith('@gmail.com')) {
+        throw new Error('Only @gmail.com email addresses are accepted');
+      }
+      return true;
+    }),
   body('promotionCode').optional().trim(),
   body('paymentMethod').optional().trim(),
   body('notes').optional().trim()
