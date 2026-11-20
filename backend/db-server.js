@@ -35,6 +35,25 @@ async function start(options = {}) {
 
   const db = new PGlite(dbDir);
 
+  // Ensure all baseline migrations (001, 002, 003) are applied idempotently
+  const migrations = [
+    '001_initial_schema.sql',
+    '002_multi_seller.sql',
+    '003_seven_roles_and_enterprise_portals.sql'
+  ];
+
+  for (const migFile of migrations) {
+    const migPath = path.join(__dirname, '../database/migrations', migFile);
+    if (fs.existsSync(migPath)) {
+      try {
+        const sql = fs.readFileSync(migPath, 'utf8');
+        await db.exec(sql);
+      } catch (migErr) {
+        console.warn(`Migration ${migFile} check:`, migErr.message);
+      }
+    }
+  }
+
   const server = new PGLiteSocketServer({
     db,
     port: 5432,
