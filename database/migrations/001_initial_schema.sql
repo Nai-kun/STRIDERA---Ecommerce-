@@ -2,7 +2,10 @@
 -- Compatible with PostgreSQL 14+
 -- Conforms to Prisma schema and contents/diagrams/erd.mmd
 
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+-- Helper wrapper for UUID generation (PGlite and PostgreSQL 13+ have gen_random_uuid built-in)
+CREATE OR REPLACE FUNCTION uuid_generate_v4() RETURNS uuid AS $$
+  SELECT gen_random_uuid();
+$$ LANGUAGE sql;
 
 -- Enums
 CREATE TYPE user_role AS ENUM ('CUSTOMER', 'ADMIN');

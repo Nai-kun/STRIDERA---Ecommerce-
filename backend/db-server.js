@@ -35,21 +35,17 @@ async function start(options = {}) {
 
   const db = new PGlite(dbDir);
 
-  // Ensure all baseline migrations (001, 002, 003) are applied idempotently
-  const migrations = [
-    '001_initial_schema.sql',
-    '002_multi_seller.sql',
-    '003_seven_roles_and_enterprise_portals.sql'
-  ];
-
-  for (const migFile of migrations) {
-    const migPath = path.join(__dirname, '../database/migrations', migFile);
-    if (fs.existsSync(migPath)) {
-      try {
-        const sql = fs.readFileSync(migPath, 'utf8');
-        await db.exec(sql);
-      } catch (migErr) {
-        console.warn(`Migration ${migFile} check:`, migErr.message);
+  // Apply complete relational database schema
+  const schemaPath = path.join(__dirname, '../database/schema.sql');
+  if (fs.existsSync(schemaPath)) {
+    try {
+      const sql = fs.readFileSync(schemaPath, 'utf8');
+      await db.exec(sql);
+      console.log('✅ STRIDERA complete relational schema applied successfully');
+    } catch (migErr) {
+      // Ignore already-existing objects on subsequent runs
+      if (!migErr.message.includes('already exists')) {
+        console.warn('Schema apply notice:', migErr.message);
       }
     }
   }
