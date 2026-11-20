@@ -6,7 +6,7 @@ import { useParams } from 'next/navigation';
 import { submitProductReview, addToWishlist } from '../../../lib/api';
 import HeaderAuthActions from '../../../components/HeaderAuthActions';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+const API = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 export default function ProductDetailPage() {
   const { slug } = useParams();

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import HeaderAuthActions from '../../components/HeaderAuthActions';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+const API = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 function ShopPageContent() {
   const searchParams = useSearchParams();

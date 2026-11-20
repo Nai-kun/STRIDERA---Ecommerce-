@@ -1,5 +1,5 @@
 // Shared API utility across all 7 STRIDERA User Roles & Portals
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 export async function apiFetch(endpoint, options = {}) {
   const url = `${API_BASE}${endpoint}`;
