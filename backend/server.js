@@ -29,18 +29,20 @@ const PORT = process.env.PORT || 5000;
 
 // Security
 app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" }
+  crossOriginResourcePolicy: false
 }));
 
-// CORS — allow localhost, 127.0.0.1, and configured FRONTEND_URL
-app.use(cors({
-  origin: process.env.NODE_ENV === 'production'
-    ? (process.env.FRONTEND_URL || 'http://localhost:3000')
-    : true,
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token']
-}));
+// CORS — unrestricted in development and explicitly allow all origins, headers & methods
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-CSRF-Token');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
 
 // Body parsing — raw body needed for webhook signature verification
 app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
