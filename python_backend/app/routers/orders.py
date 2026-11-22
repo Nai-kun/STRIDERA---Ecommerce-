@@ -402,11 +402,11 @@ def get_order_by_number(
         raise HTTPException(status_code=404, detail="Order not found")
 
     user_id = user.id if user else None
-    is_staff = bool(user and user.role in {"ADMIN", "CUSTOMER_SUPPORT", "FINANCE_OFFICER", "DELIVERY_PERSONNEL"})
+    is_staff = bool(user and user.role in {"ADMIN", "CUSTOMER_SUPPORT", "FINANCE_OFFICER", "DELIVERY_PERSONNEL", "INVENTORY_MANAGER"})
     is_seller_in_order = bool(user and any(so.seller_id == user.id for so in (order.seller_orders or [])))
 
-    if not is_staff and not is_seller_in_order and order.user_id != user_id:
-        if not order.guest_email or order.guest_email != email:
+    if order.user_id is not None and not is_staff and not is_seller_in_order and order.user_id != user_id:
+        if not order.guest_email or (email and order.guest_email != email and (not user or order.guest_email != user.email)):
             raise HTTPException(status_code=403, detail="Access denied")
 
     return {"success": True, "data": serialize_order(order, include_seller_orders=True)}
@@ -415,14 +415,17 @@ def get_order_by_number(
 @router.patch("/{order_number}/confirm-receipt")
 def confirm_order_receipt(
     order_number: str,
-    user: User = Depends(get_current_user),
+    user: User | None = Depends(get_optional_user),
     db: Session = Depends(get_db),
 ):
     order = db.query(Order).options(selectinload(Order.shipments)).filter(Order.order_number == order_number).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    if order.user_id != user.id and user.role != "ADMIN":
+    if order.user_id and user and order.user_id != user.id and user.role != "ADMIN":
         raise HTTPException(status_code=403, detail="Access denied")
+
+    actor_email = user.email if user else (order.guest_email or "guest@stridera.ph")
+    actor_name = f"{user.first_name} {user.last_name}" if user else (order.shipping_full_name or "Customer")
 
     now = utcnow_naive()
     order.received_confirmed_at = now
@@ -439,12 +442,12 @@ def confirm_order_receipt(
         prev_events.append({
             "status": "DELIVERED",
             "note": "Customer confirmed package receipt",
-            "actor": user.email,
+            "actor": actor_email,
             "timestamp": now.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
         })
         s.status = "DELIVERED"
         s.delivered_at = s.delivered_at or now
-        s.recipient_name = s.recipient_name or f"{user.first_name} {user.last_name}"
+        s.recipient_name = s.recipient_name or actor_name
         s.history = {"events": prev_events}
 
     db.commit()
@@ -460,13 +463,13 @@ def confirm_order_receipt(
 @router.patch("/{order_number}/cancel")
 def cancel_order(
     order_number: str,
-    user: User = Depends(get_current_user),
+    user: User | None = Depends(get_optional_user),
     db: Session = Depends(get_db),
 ):
     order = db.query(Order).options(selectinload(Order.items)).filter(Order.order_number == order_number).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    if order.user_id != user.id and user.role not in {"ADMIN", "CUSTOMER_SUPPORT"}:
+    if order.user_id and user and order.user_id != user.id and user.role not in {"ADMIN", "CUSTOMER_SUPPORT"}:
         raise HTTPException(status_code=403, detail="Access denied")
     if order.order_status not in {"PENDING", "CONFIRMED"}:
         raise HTTPException(status_code=400, detail=f"Cannot cancel order in {order.order_status} status")

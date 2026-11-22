@@ -51,7 +51,6 @@ async function resolveUserFromRequest(req) {
     if (user && (!user.sessionExpiresAt || new Date(user.sessionExpiresAt) > new Date())) {
       return user;
     }
-    return null;
   }
 
   let token = req.cookies?.token;

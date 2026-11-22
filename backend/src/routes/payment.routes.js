@@ -166,7 +166,7 @@ router.post('/confirm-sandbox', optionalAuth, async (req, res, next) => {
 });
 
 // POST /api/payments/fail-sandbox — Simulate E-Wallet Payment Failure & Retry Eligibility (FR-4.7)
-router.post('/fail-sandbox', authenticate, async (req, res, next) => {
+router.post('/fail-sandbox', optionalAuth, async (req, res, next) => {
   try {
     const { orderNumber, reason = 'Insufficient e-wallet balance or user cancelled authorization' } = req.body;
     if (!orderNumber) {
@@ -178,7 +178,7 @@ router.post('/fail-sandbox', authenticate, async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    if (order.userId !== req.user.id && req.user.role !== 'ADMIN') {
+    if (order.userId && req.user && order.userId !== req.user.id && req.user.role !== 'ADMIN') {
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
@@ -199,7 +199,7 @@ router.post('/fail-sandbox', authenticate, async (req, res, next) => {
 
       await tx.auditLog.create({
         data: {
-          userId: req.user.id,
+          userId: req.user ? req.user.id : order.userId,
           action: 'EWALLET_PAYMENT_FAILED',
           entityType: 'Order',
           entityId: order.id,

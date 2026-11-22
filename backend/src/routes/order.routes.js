@@ -394,9 +394,9 @@ router.get('/:orderNumber', optionalAuth, async (req, res, next) => {
     const isStaff = ['ADMIN', 'CUSTOMER_SUPPORT', 'DELIVERY_PERSONNEL', 'FINANCE_OFFICER', 'INVENTORY_MANAGER'].includes(role);
     const isSellerInOrder = role === 'SELLER' && order.sellerOrders.some(so => so.sellerId === userId);
 
-    if (!isStaff && !isSellerInOrder && order.userId !== userId) {
+    if (order.userId && !isStaff && !isSellerInOrder && order.userId !== userId) {
       const emailCheck = req.query.email;
-      if (!order.guestEmail || order.guestEmail !== emailCheck) {
+      if (!order.guestEmail || (emailCheck && order.guestEmail !== emailCheck && (!req.user || order.guestEmail !== req.user.email))) {
         return res.status(403).json({ success: false, message: 'Access denied' });
       }
     }
@@ -417,7 +417,7 @@ router.get('/:orderNumber', optionalAuth, async (req, res, next) => {
 });
 
 // PATCH /api/orders/:orderNumber/confirm-receipt — Shopper confirms package receipt (FR-7.7 & Process Flow 1)
-router.patch('/:orderNumber/confirm-receipt', authenticate, async (req, res, next) => {
+router.patch('/:orderNumber/confirm-receipt', optionalAuth, async (req, res, next) => {
   try {
     const { orderNumber } = req.params;
     const order = await prisma.order.findUnique({
@@ -429,9 +429,12 @@ router.patch('/:orderNumber/confirm-receipt', authenticate, async (req, res, nex
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    if (order.userId !== req.user.id && req.user.role !== 'ADMIN') {
+    if (order.userId && req.user && order.userId !== req.user.id && req.user.role !== 'ADMIN') {
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
+
+    const actorEmail = req.user ? req.user.email : (order.guestEmail || 'guest@stridera.ph');
+    const actorName = req.user ? `${req.user.firstName} ${req.user.lastName}` : (order.shippingFullName || 'Customer');
 
     const now = new Date();
     const updatedOrder = await prisma.$transaction(async (tx) => {
@@ -456,14 +459,14 @@ router.patch('/:orderNumber/confirm-receipt', authenticate, async (req, res, nex
           data: {
             status: 'DELIVERED',
             deliveredAt: s.deliveredAt || now,
-            recipientName: s.recipientName || `${req.user.firstName} ${req.user.lastName}`,
+            recipientName: s.recipientName || actorName,
             history: {
               events: [
                 ...prevEvents,
                 {
                   status: 'DELIVERED',
                   note: 'Customer confirmed package receipt',
-                  actor: req.user.email,
+                  actor: actorEmail,
                   timestamp: now.toISOString()
                 }
               ]
@@ -486,7 +489,7 @@ router.patch('/:orderNumber/confirm-receipt', authenticate, async (req, res, nex
 });
 
 // PATCH /api/orders/:orderNumber/cancel — Cancel a pending or unshipped order (FR-3.12)
-router.patch('/:orderNumber/cancel', authenticate, async (req, res, next) => {
+router.patch('/:orderNumber/cancel', optionalAuth, async (req, res, next) => {
   try {
     const { orderNumber } = req.params;
 
@@ -499,7 +502,7 @@ router.patch('/:orderNumber/cancel', authenticate, async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    if (order.userId !== req.user.id && !['ADMIN', 'CUSTOMER_SUPPORT'].includes(req.user.role)) {
+    if (order.userId && req.user && order.userId !== req.user.id && !['ADMIN', 'CUSTOMER_SUPPORT'].includes(req.user.role)) {
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
 

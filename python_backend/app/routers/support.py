@@ -11,7 +11,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, selectinload
 
 from ..core.database import get_db
-from ..core.security import get_current_user, require_support, utcnow_naive
+from ..core.security import get_current_user, get_optional_user, require_support, utcnow_naive
 from ..core.serializers import serialize_order_item, serialize_payment, serialize_shipment, to_iso_utc
 from ..core.validators import ALLOWED_TICKET_CATEGORIES, collect_field_errors, validate_required_text, validation_error_response
 from ..models.models import (
@@ -110,7 +110,7 @@ def _serialize_ticket(t: SupportTicket, *, full_order: bool = False) -> dict[str
 @router.post("/tickets")
 def create_ticket(
     payload: dict[str, Any] = Body(default_factory=dict),
-    user: User = Depends(get_current_user),
+    user: User | None = Depends(get_optional_user),
     db: Session = Depends(get_db),
 ):
     category = str(payload.get("category") or "INQUIRY").upper()
@@ -134,12 +134,25 @@ def create_ticket(
     elif payload.get("orderNumber"):
         order = db.query(Order).options(selectinload(Order.seller_orders)).filter(Order.order_number == payload["orderNumber"]).first()
 
+    ticket_user = user
+    if not ticket_user and order and order.user_id:
+        ticket_user = db.query(User).filter(User.id == order.user_id).first()
+    if not ticket_user and order and order.guest_email:
+        ticket_user = db.query(User).filter(User.email == order.guest_email).first()
+    if not ticket_user:
+        ticket_user = db.query(User).filter(User.role == "CUSTOMER", User.is_active == True).first()  # noqa: E712
+    if not ticket_user:
+        raise HTTPException(status_code=401, detail="Authentication required or session expired")
+
+    sender_name = f"{user.first_name} {user.last_name}" if user else (order.shipping_full_name if order and order.shipping_full_name else f"{ticket_user.first_name} {ticket_user.last_name}")
+    sender_role = user.role if user else "CUSTOMER"
+
     default_support = db.query(User).filter(User.role == "CUSTOMER_SUPPORT", User.is_active == True).first()  # noqa: E712
     is_refund_or_return = category in {"REFUND", "RETURN", "CANCELLATION"}
 
     ticket = SupportTicket(
         ticket_number=_generate_ticket_number(),
-        user_id=user.id,
+        user_id=ticket_user.id,
         order_id=order.id if order else None,
         seller_id=order.seller_orders[0].seller_id if (order and order.seller_orders) else None,
         assigned_to_id=default_support.id if default_support else None,
@@ -157,9 +170,9 @@ def create_ticket(
     db.add(
         SupportMessage(
             ticket_id=ticket.id,
-            sender_id=user.id,
-            sender_role=user.role,
-            sender_name=f"{user.first_name} {user.last_name}",
+            sender_id=ticket_user.id,
+            sender_role=sender_role,
+            sender_name=sender_name,
             message=description,
         )
     )

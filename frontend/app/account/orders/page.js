@@ -2,8 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-
-const API = process.env.NEXT_PUBLIC_API_URL || '/api';
+import { getOrders } from '../../../lib/api';
 
 const STATUS_COLORS = {
   PENDING: 'var(--color-warning)',
@@ -28,13 +27,12 @@ export default function OrdersPage() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    fetch(`${API}/orders`, { credentials: 'include' })
-      .then(r => r.json())
+    getOrders()
       .then(d => {
-        if (d.success) setOrders(d.data);
+        if (d.success) setOrders(d.data || []);
         else setError(d.message || 'Failed to load orders');
       })
-      .catch(() => setError('Failed to load orders. Please sign in.'))
+      .catch(err => setError(err.message || 'Failed to load orders. Please sign in.'))
       .finally(() => setLoading(false));
   }, []);
 

@@ -121,13 +121,13 @@ def resolve_user_from_request(request: Request, db: Session) -> Optional[User]:
         user = db.execute(select(User).where(User.session_token_hash == token_hash)).scalar_one_or_none()
         if user and (not user.session_expires_at or user.session_expires_at > utcnow_naive()):
             return user
-        return None
 
-    token = request.cookies.get("token")
+    token = None
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
     if not token:
-        auth_header = request.headers.get("authorization", "")
-        if auth_header.startswith("Bearer "):
-            token = auth_header.split(" ", 1)[1].strip()
+        token = request.cookies.get("token")
     if not token:
         return None
 
@@ -136,12 +136,8 @@ def resolve_user_from_request(request: Request, db: Session) -> Optional[User]:
     if not user:
         return None
 
-    sid = decoded.get("sid")
-    if sid:
-        if not user.session_token_hash or not user.session_token_hash.startswith(sid):
-            return None
-        if user.session_expires_at and user.session_expires_at <= utcnow_naive():
-            return None
+    if user.session_expires_at and user.session_expires_at <= utcnow_naive():
+        return None
     return user
 
 

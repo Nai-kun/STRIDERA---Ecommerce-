@@ -157,7 +157,7 @@ def confirm_sandbox_payment(
 def fail_sandbox_payment(
     request: Request,
     payload: dict[str, Any] = Body(default_factory=dict),
-    user: User = Depends(get_current_user),
+    user: User | None = Depends(get_optional_user),
     db: Session = Depends(get_db),
 ):
     order_number = str(payload.get("orderNumber") or "").strip()
@@ -168,7 +168,7 @@ def fail_sandbox_payment(
     order = db.query(Order).filter(Order.order_number == order_number).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    if order.user_id != user.id and user.role != "ADMIN":
+    if order.user_id and user and order.user_id != user.id and user.role != "ADMIN":
         raise HTTPException(status_code=403, detail="Access denied")
     if order.payment_status == "PAID":
         raise HTTPException(status_code=400, detail="Order is already paid")
@@ -177,7 +177,7 @@ def fail_sandbox_payment(
     order.payment_status = "FAILED"
     db.add(
         AuditLog(
-            user_id=user.id,
+            user_id=user.id if user else order.user_id,
             action="EWALLET_PAYMENT_FAILED",
             entity_type="Order",
             entity_id=order.id,

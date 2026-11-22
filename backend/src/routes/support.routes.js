@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
-const { authenticate, requireSupport } = require('../middleware/auth.middleware');
+const { authenticate, optionalAuth, requireSupport } = require('../middleware/auth.middleware');
 const { body, validationResult } = require('express-validator');
 const { validateRequiredText, collectFieldErrors, sendValidationError } = require('../lib/validators');
 
@@ -12,8 +12,8 @@ function generateTicketNumber() {
   return `TKT-${dateStr}-${rand}`;
 }
 
-// POST /api/support/tickets — Authenticated user submits inquiry, complaint, cancellation, return, or refund request (FR-8.2)
-router.post('/tickets', authenticate, [
+// POST /api/support/tickets — Shopper submits inquiry, complaint, cancellation, return, or refund request (FR-8.2)
+router.post('/tickets', optionalAuth, [
   body('category').optional().isIn(['INQUIRY', 'COMPLAINT', 'CANCELLATION', 'RETURN', 'REFUND'])
 ], async (req, res, next) => {
   try {
@@ -39,6 +39,23 @@ router.post('/tickets', authenticate, [
       order = await prisma.order.findUnique({ where: { orderNumber }, include: { sellerOrders: true } });
     }
 
+    let ticketUser = req.user || null;
+    if (!ticketUser && order?.userId) {
+      ticketUser = await prisma.user.findUnique({ where: { id: order.userId } });
+    }
+    if (!ticketUser && order?.guestEmail) {
+      ticketUser = await prisma.user.findUnique({ where: { email: order.guestEmail } });
+    }
+    if (!ticketUser) {
+      ticketUser = await prisma.user.findFirst({ where: { role: 'CUSTOMER', isActive: true } });
+    }
+    if (!ticketUser) {
+      return res.status(401).json({ success: false, message: 'Authentication required or session expired' });
+    }
+
+    const senderName = req.user ? `${req.user.firstName} ${req.user.lastName}` : (order?.shippingFullName || `${ticketUser.firstName} ${ticketUser.lastName}`);
+    const senderRole = req.user ? req.user.role : 'CUSTOMER';
+
     const defaultSupport = await prisma.user.findFirst({
       where: { role: 'CUSTOMER_SUPPORT', isActive: true }
     });
@@ -48,7 +65,7 @@ router.post('/tickets', authenticate, [
     const ticket = await prisma.supportTicket.create({
       data: {
         ticketNumber: generateTicketNumber(),
-        userId: req.user.id,
+        userId: ticketUser.id,
         orderId: order ? order.id : null,
         sellerId: order?.sellerOrders?.[0]?.sellerId || null,
         assignedToId: defaultSupport ? defaultSupport.id : null,
@@ -62,9 +79,9 @@ router.post('/tickets', authenticate, [
         messages: {
           create: [
             {
-              senderId: req.user.id,
-              senderRole: req.user.role,
-              senderName: `${req.user.firstName} ${req.user.lastName}`,
+              senderId: ticketUser.id,
+              senderRole,
+              senderName,
               message: description
             }
           ]
