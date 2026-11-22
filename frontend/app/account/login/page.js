@@ -13,6 +13,17 @@ import {
 import InlineFieldError from '../../../components/InlineFieldError';
 import PasswordInput from '../../../components/PasswordInput';
 
+const DEMO_ROLES = [
+  { role: '1. Shopper', email: 'demo@stridera.ph', pass: 'Customer@123!', badge: '#0284c7' },
+  { role: '2a. Seller (Apex)', email: 'seller@stridera.ph', pass: 'Seller@123!', badge: '#059669' },
+  { role: '2b. Seller (Manila Sole)', email: 'sole@stridera.ph', pass: 'Seller@123!', badge: '#0d9488' },
+  { role: '3. Administrator', email: 'admin@stridera.ph', pass: 'Admin@Stridera2024!', badge: '#7c3aed' },
+  { role: '4. Inventory Manager', email: 'inventory@stridera.ph', pass: 'Inventory@123!', badge: '#d97706' },
+  { role: '5. Delivery Personnel', email: 'delivery@stridera.ph', pass: 'Delivery@123!', badge: '#ea580c' },
+  { role: '6. Customer Support', email: 'support@stridera.ph', pass: 'Support@123!', badge: '#2563eb' },
+  { role: '7. Finance Officer', email: 'finance@stridera.ph', pass: 'Finance@123!', badge: '#16a34a' }
+];
+
 function getRedirectForRole(role) {
   switch (role) {
     case 'SELLER': return '/seller/dashboard';
@@ -71,6 +82,26 @@ export default function LoginPage() {
     setFieldErrors((prev) => ({ ...prev, [field]: err }));
   };
 
+  const performLogin = async (emailInput, passwordInput) => {
+    setLoading(true);
+    setError(null);
+    setFieldErrors({});
+    try {
+      const data = await login(emailInput.trim().toLowerCase(), passwordInput, keepSignedIn);
+      const user = data.data?.user;
+      const token = data.data?.token;
+      if (typeof window !== 'undefined') {
+        if (token) localStorage.setItem('stridera_token', token);
+        if (user) localStorage.setItem('stridera_user', JSON.stringify(user));
+      }
+      router.push(getRedirectForRole(user?.role));
+    } catch (err) {
+      setError(err?.message || 'Invalid email or password.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (loading) return;
@@ -86,21 +117,7 @@ export default function LoginPage() {
       return;
     }
 
-    setLoading(true);
-    try {
-      const data = await login(form.email.trim().toLowerCase(), form.password, keepSignedIn);
-      const user = data.data?.user;
-      const token = data.data?.token;
-      if (typeof window !== 'undefined') {
-        if (token) localStorage.setItem('stridera_token', token);
-        if (user) localStorage.setItem('stridera_user', JSON.stringify(user));
-      }
-      router.push(getRedirectForRole(user?.role));
-    } catch {
-      setError('Invalid email or password.');
-    } finally {
-      setLoading(false);
-    }
+    await performLogin(form.email, form.password);
   };
 
   const handlePasswordRecovery = async (e) => {
@@ -231,6 +248,38 @@ export default function LoginPage() {
             {' '}|{' '}
             <Link href="/seller/register" style={{ color: 'var(--color-brand-primary)', fontWeight: 600 }}>Apply as Seller</Link>
           </p>
+
+          {/* 7-Role Quick Demo Switcher */}
+          <div style={{
+            marginTop: 'var(--space-6)', padding: 'var(--space-4)',
+            background: 'var(--color-surface)', borderRadius: 'var(--radius-lg)',
+            border: '1px solid var(--color-border)'
+          }}>
+            <div style={{ fontSize: 'var(--text-xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-text-muted)', marginBottom: 'var(--space-3)' }}>
+              ⚡ 1-Click Demo Login (All 7 System Roles)
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-2)' }}>
+              {DEMO_ROLES.map((d) => (
+                <button
+                  key={d.email}
+                  type="button"
+                  disabled={loading}
+                  onClick={() => {
+                    setForm({ email: d.email, password: d.pass });
+                    performLogin(d.email, d.pass);
+                  }}
+                  style={{
+                    textAlign: 'left', padding: '8px 10px',
+                    borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg)', cursor: 'pointer'
+                  }}
+                >
+                  <div style={{ fontSize: 'var(--text-xs)', fontWeight: 700, color: d.badge }}>{d.role}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>{d.email}</div>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
