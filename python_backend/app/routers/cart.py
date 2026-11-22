@@ -41,23 +41,40 @@ def _query_cart_with_items(db: Session, *, cart_id: str | None = None, user_id: 
 
 
 def _get_or_create_cart(db: Session, user_id: str | None, session_id: str | None) -> Cart:
-    cart = None
-    if user_id:
-        cart = _query_cart_with_items(db, user_id=user_id)
-    elif session_id:
-        cart = _query_cart_with_items(db, session_id=session_id)
+    user_cart = _query_cart_with_items(db, user_id=user_id) if user_id else None
+    guest_cart = _query_cart_with_items(db, session_id=session_id) if session_id else None
 
-    if not cart:
-        cart = Cart(
-            user_id=user_id,
-            session_id=None if user_id else (session_id or str(uuid.uuid4())),
-            expires_at=None if user_id else (utcnow_naive() + timedelta(days=7)),
-        )
-        db.add(cart)
-        db.commit()
-        cart = _query_cart_with_items(db, cart_id=cart.id)
-    assert cart is not None
-    return cart
+    # Merge guest cart into user cart if user just logged in
+    if user_id and guest_cart and guest_cart.items:
+        if not user_cart:
+            guest_cart.user_id = user_id
+            guest_cart.session_id = None
+            db.commit()
+            return _query_cart_with_items(db, cart_id=guest_cart.id)
+        else:
+            for g_item in guest_cart.items:
+                existing = next((i for i in user_cart.items if i.product_variant_id == g_item.product_variant_id), None)
+                if existing:
+                    existing.quantity += g_item.quantity
+                else:
+                    g_item.cart_id = user_cart.id
+            db.delete(guest_cart)
+            db.commit()
+            return _query_cart_with_items(db, cart_id=user_cart.id)
+
+    if user_cart:
+        return user_cart
+    if guest_cart:
+        return guest_cart
+
+    cart = Cart(
+        user_id=user_id,
+        session_id=None if user_id else (session_id or str(uuid.uuid4())),
+        expires_at=None if user_id else (utcnow_naive() + timedelta(days=7)),
+    )
+    db.add(cart)
+    db.commit()
+    return _query_cart_with_items(db, cart_id=cart.id)
 
 
 def _format_cart_response(cart: Cart) -> dict[str, Any]:
