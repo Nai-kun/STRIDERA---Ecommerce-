@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+import logging
 import uuid
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+logger = logging.getLogger("stridera.orders")
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -76,7 +82,36 @@ async def create_order(
     user: User | None = Depends(get_optional_user),
     db: Session = Depends(get_db),
 ):
-    sa = payload.get("shippingAddress") if isinstance(payload.get("shippingAddress"), dict) else {}
+    nested = payload.get("shippingAddress") if isinstance(payload.get("shippingAddress"), dict) else {}
+
+    class _AddrView:
+        """Accept both nested `shippingAddress.{fullName,...}` and the flat
+        `shippingFullName/shippingPhone/...` payload used by the web checkout."""
+
+        _FLAT = {
+            "fullName": "shippingFullName",
+            "phone": "shippingPhone",
+            "addressLine1": "shippingAddressLine1",
+            "addressLine2": "shippingAddressLine2",
+            "barangay": "shippingBarangay",
+            "city": "shippingCity",
+            "province": "shippingProvince",
+            "region": "shippingRegion",
+            "postalCode": "shippingPostalCode",
+            "regionCode": "shippingRegionCode",
+            "provinceCode": "shippingProvinceCode",
+            "cityCode": "shippingCityCode",
+            "barangayCode": "shippingBarangayCode",
+            "addressSource": "shippingAddressSource",
+        }
+
+        def get(self, key, default=None):
+            val = nested.get(key)
+            if val is None or (isinstance(val, str) and not val.strip()):
+                val = payload.get(self._FLAT.get(key, key))
+            return default if val is None else val
+
+    sa = _AddrView()
     guest_email_input = payload.get("guestEmail")
     shipping_full_name = sa.get("fullName")
     shipping_phone = sa.get("phone")
@@ -101,6 +136,7 @@ async def create_order(
 
     collected = collect_field_errors(checks)
     if not collected["ok"]:
+        logger.warning(f"[Order] Validation failed: {collected.get('errors')}")
         return validation_error_response(collected)
 
     vals = collected["values"]
@@ -125,6 +161,7 @@ async def create_order(
                 barangay_code=b_code,
             )
         except psgc_client.PsgcError as exc:
+            logger.warning(f"[Order] PSGC validation error: {exc}")
             return JSONResponse(
                 status_code=exc.status_code or 400,
                 content={
@@ -144,16 +181,17 @@ async def create_order(
         b_code = verified["barangayCode"]
         addr_source = "PSGC_VERIFIED"
 
-    # Resolve cart for user or guest
+    # Resolve cart for user or guest (fallback to guest session if user cart is empty)
     user_id = user.id if user else None
     session_id = request.cookies.get("cart_session") or request.headers.get("x-cart-session")
     cart = None
     if user_id:
         cart = db.query(Cart).options(selectinload(Cart.items)).filter(Cart.user_id == user_id).first()
-    elif session_id:
+    if (not cart or not cart.items) and session_id:
         cart = db.query(Cart).options(selectinload(Cart.items)).filter(Cart.session_id == session_id).first()
 
     if not cart or not cart.items:
+        logger.warning(f"[Order] Cart is empty or not found. user_id={user_id}, session_id={session_id}")
         raise HTTPException(status_code=400, detail="Your cart is empty")
 
     # Compute Nager.Date Holiday-Aware Delivery Estimate
