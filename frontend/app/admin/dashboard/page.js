@@ -23,6 +23,7 @@ import {
   updateAdminApiSettings,
   getAdminWebhooks,
   getAdminHealth,
+  getPhilippineHolidays,
   simulatePayment,
   logout
 } from '../../../lib/api';
@@ -79,9 +80,10 @@ export default function AdminDashboardPage() {
   const [analytics, setAnalytics] = useState(null);
   const [analyticsPeriod, setAnalyticsPeriod] = useState('30d');
   const [apiSettings, setApiSettings] = useState(null);
-  const [apiKeyForm, setApiKeyForm] = useState({ PAYMONGO_SECRET_KEY: '', PAYMONGO_PUBLIC_KEY: '', PAYMONGO_WEBHOOK_SECRET: '' });
+  const [apiKeyForm, setApiKeyForm] = useState({});
   const [webhooks, setWebhooks] = useState([]);
   const [health, setHealth] = useState(null);
+  const [holidayCalendar, setHolidayCalendar] = useState(null);
   const [loading, setLoading] = useState(true);
   const [notification, setNotification] = useState(null);
 
@@ -101,7 +103,7 @@ export default function AdminDashboardPage() {
   const loadAll = async () => {
     try {
       setLoading(true);
-      const [repRes, usrRes, selRes, brRes, ordRes, cfgRes, pCfgRes, payRes, audRes, anaRes, apiRes, whRes, hltRes] = await Promise.allSettled([
+      const [repRes, usrRes, selRes, brRes, ordRes, cfgRes, pCfgRes, payRes, audRes, anaRes, apiRes, whRes, hltRes, holRes] = await Promise.allSettled([
         getAdminReports(),
         getAdminUsers(),
         getAdminSellers(),
@@ -114,7 +116,8 @@ export default function AdminDashboardPage() {
         getAdminAnalytics(analyticsPeriod),
         getAdminApiSettings(),
         getAdminWebhooks(),
-        getAdminHealth()
+        getAdminHealth(),
+        getPhilippineHolidays()
       ]);
 
       if (repRes.status === 'fulfilled' && repRes.value.success) setReports(repRes.value.data);
@@ -130,6 +133,7 @@ export default function AdminDashboardPage() {
       if (apiRes.status === 'fulfilled' && apiRes.value.success) setApiSettings(apiRes.value.data);
       if (whRes.status === 'fulfilled' && whRes.value.success) setWebhooks(whRes.value.data);
       if (hltRes.status === 'fulfilled' && hltRes.value.success) setHealth(hltRes.value.data);
+      if (holRes.status === 'fulfilled' && holRes.value.success) setHolidayCalendar(holRes.value.data);
     } catch (e) {
       console.error(e);
       notify('Failed to load administrator records', true);
@@ -922,10 +926,10 @@ export default function AdminDashboardPage() {
                         </div>
 
                         <div style={{ padding: 'var(--space-4)', background: 'var(--color-surface-raised)', borderRadius: 'var(--radius-md)' }}>
-                          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>PayMongo E-Wallet Gateway</div>
-                          <div style={{ fontWeight: 700, marginTop: 'var(--space-1)' }}>Mode: {config.paymentGateway.mode}</div>
-                          <div style={{ fontSize: 'var(--text-xs)' }}>Secret Key: <code style={{ fontFamily: 'monospace' }}>{config.paymentGateway.secretKeyMasked}</code></div>
-                          <div style={{ fontSize: 'var(--text-xs)' }}>Webhook Secret: <code style={{ fontFamily: 'monospace' }}>{config.paymentGateway.webhookSecretMasked}</code></div>
+                          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>External Free APIs</div>
+                          <div style={{ fontWeight: 700, marginTop: 'var(--space-1)' }}>PSGC Address API & Nager.Date Public Holidays</div>
+                          <div style={{ fontSize: 'var(--text-xs)' }}>PSGC Status: <code style={{ fontFamily: 'monospace' }}>OPERATIONAL (Free)</code></div>
+                          <div style={{ fontSize: 'var(--text-xs)' }}>Holidays API: <code style={{ fontFamily: 'monospace' }}>OPERATIONAL (Free)</code></div>
                         </div>
 
                         <div style={{ padding: 'var(--space-4)', background: 'var(--color-surface-raised)', borderRadius: 'var(--radius-md)' }}>
@@ -1156,7 +1160,30 @@ export default function AdminDashboardPage() {
                         {health?.psgcHealth?.host || 'psgc.gitlab.io'} • Cache: {health?.psgcHealth?.cache?.entries ?? 0} entries ({health?.psgcHealth?.cache?.hits ?? 0} hits)
                       </div>
                     </div>
+                    <div style={{ padding: 'var(--space-4)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
+                      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>PH PUBLIC HOLIDAYS API (NAGER.DATE)</div>
+                      <div style={{ fontWeight: 700, color: health?.holidayHealth?.reachable ? '#166534' : '#B91C1C' }}>
+                        {health?.holidayHealth?.reachable
+                          ? `Reachable (${health.holidayHealth.httpStatus || 200}, ${health.holidayHealth.latencyMs} ms • ${health.holidayHealth.holidayCount || 0} holidays)`
+                          : 'Unreachable'}
+                      </div>
+                      <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: 2 }}>
+                        {health?.holidayHealth?.host || 'date.nager.at'} ({health?.holidayHealth?.countryCode || 'PH'} {health?.holidayHealth?.year || ''}) • Cache: {health?.holidayHealth?.cache?.entries ?? 0} entries ({health?.holidayHealth?.cache?.hits ?? 0} hits)
+                      </div>
+                    </div>
                   </div>
+                  {holidayCalendar?.upcoming?.length > 0 && (
+                    <div style={{
+                      marginTop: 'var(--space-4)',
+                      padding: 'var(--space-3) var(--space-4)',
+                      borderRadius: 'var(--radius-md)',
+                      background: 'var(--color-surface-raised)',
+                      fontSize: 'var(--text-xs)'
+                    }}>
+                      <strong>Upcoming PH Courier Holidays ({holidayCalendar.year}):</strong>{' '}
+                      {holidayCalendar.upcoming.map(h => `${h.name} (${h.date})`).join(' • ')}
+                    </div>
+                  )}
                 </div>
 
                 {/* Encrypted Sandbox API Keys */}
@@ -1165,38 +1192,22 @@ export default function AdminDashboardPage() {
                   <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-4)' }}>
                     Keys are encrypted at rest (AES-256-GCM) and displayed masked. Live keys (sk_live_, pk_live_) are rejected.
                   </p>
-                  <form
-                    onSubmit={async (e) => {
-                      e.preventDefault();
-                      try {
-                        const res = await updateAdminApiSettings(apiKeyForm);
-                        notify(res.message || 'Sandbox API settings saved!');
-                        setApiKeyForm({ PAYMONGO_SECRET_KEY: '', PAYMONGO_PUBLIC_KEY: '', PAYMONGO_WEBHOOK_SECRET: '' });
-                        loadAll();
-                      } catch (err) {
-                        notify(err.message || 'Failed to save API keys', true);
-                      }
-                    }}
-                    style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 'var(--space-4)' }}
-                  >
-                    {['PAYMONGO_SECRET_KEY', 'PAYMONGO_PUBLIC_KEY', 'PAYMONGO_WEBHOOK_SECRET'].map(k => (
-                      <div key={k}>
-                        <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 4 }}>
-                          {k} <span style={{ color: 'var(--color-text-muted)' }}>({apiSettings?.settings?.[k]?.masked || 'unset'})</span>
-                        </label>
-                        <PasswordInput
-                          className="form-input"
-                          toggleLabel="key"
-                          placeholder="Enter new sandbox key..."
-                          value={apiKeyForm[k]}
-                          onChange={e => setApiKeyForm(p => ({ ...p, [k]: e.target.value }))}
-                        />
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 'var(--space-4)' }}>
+                    <div style={{ padding: 'var(--space-4)', background: 'var(--color-surface-raised)', borderRadius: 'var(--radius-md)' }}>
+                      <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>🇵🇭 PSGC Philippine Address API</div>
+                      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 4 }}>
+                        Free public REST API powering cascaded dropdowns for Regions, Provinces, Cities, and Barangays.
                       </div>
-                    ))}
-                    <div style={{ gridColumn: '1 / -1' }}>
-                      <button type="submit" className="btn btn-primary btn-sm">Save Encrypted Sandbox Keys</button>
+                      <div style={{ marginTop: 8, fontSize: 'var(--text-xs)', color: 'var(--color-success)', fontWeight: 600 }}>● Active & Cached (Free / No Key Required)</div>
                     </div>
-                  </form>
+                    <div style={{ padding: 'var(--space-4)', background: 'var(--color-surface-raised)', borderRadius: 'var(--radius-md)' }}>
+                      <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>📅 Nager.Date Public Holidays API</div>
+                      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 4 }}>
+                        Free public REST API powering dynamic business delivery estimates by checking PH official non-working holidays.
+                      </div>
+                      <div style={{ marginTop: 8, fontSize: 'var(--text-xs)', color: 'var(--color-success)', fontWeight: 600 }}>● Active & Cached (Free / No Key Required)</div>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Webhook Events Monitor */}

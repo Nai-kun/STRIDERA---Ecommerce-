@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation';
 import { submitProductReview, addToWishlist } from '../../../lib/api';
 import HeaderAuthActions from '../../../components/HeaderAuthActions';
 import InlineFieldError from '../../../components/InlineFieldError';
+import DeliveryEstimateBanner from '../../../components/DeliveryEstimateBanner';
 import { validateRequiredText, validateQuantity } from '../../../lib/validation';
 
 const API = process.env.NEXT_PUBLIC_API_URL || '/api';
@@ -441,6 +442,7 @@ export default function ProductDetailPage() {
                   <span style={{ fontSize: 'var(--text-xl)' }}>💳</span>
                   <div><strong style={{ color: 'var(--color-text)' }}>E-Wallet Checkout</strong> — Instant payment via GCash, Maya, or PayPal.</div>
                 </div>
+                <DeliveryEstimateBanner compact />
               </div>
             </div>
           </div>

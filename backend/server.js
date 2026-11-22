@@ -23,6 +23,7 @@ const supportRoutes = require('./src/routes/support.routes');
 const financeRoutes = require('./src/routes/finance.routes');
 const wishlistRoutes = require('./src/routes/wishlist.routes');
 const locationRoutes = require('./src/routes/location.routes');
+const scheduleRoutes = require('./src/routes/schedule.routes');
 const { errorHandler, notFound } = require('./src/middleware/error.middleware');
 
 const app = express();
@@ -81,6 +82,7 @@ app.use('/api/support', supportRoutes);
 app.use('/api/finance', financeRoutes);
 app.use('/api/wishlist', wishlistRoutes);
 app.use('/api/locations', locationRoutes);
+app.use('/api/schedule', scheduleRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

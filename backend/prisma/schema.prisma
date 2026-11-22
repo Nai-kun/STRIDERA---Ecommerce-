@@ -411,6 +411,11 @@ model Order {
   shippingAddressSource String         @default("MANUAL") @map("shipping_address_source")
   shippingPostalCode    String?        @map("shipping_postal_code")
   shippingCountry       String?        @map("shipping_country")
+  estimatedDeliveryStart String?       @map("estimated_delivery_start")
+  estimatedDeliveryEnd   String?       @map("estimated_delivery_end")
+  deliveryZone           String?       @map("delivery_zone")
+  deliveryScheduleSource String        @default("UNAVAILABLE") @map("delivery_schedule_source")
+  deliveryHolidaysObserved Json?       @map("delivery_holidays_observed")
   promotionId           String?        @map("promotion_id") @db.Uuid
   notes                 String?        @db.Text
   stockDecremented      Boolean        @default(false) @map("stock_decremented")

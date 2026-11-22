@@ -6,6 +6,7 @@ const { authenticate, isAdmin } = require('../middleware/auth.middleware');
 const { createError } = require('../middleware/error.middleware');
 const { encryptSetting, decryptSetting, maskSecret: maskApiSecret, assertSandboxKey } = require('../lib/cryptoSettings');
 const psgcClient = require('../services/psgcClient');
+const holidayClient = require('../services/holidayClient');
 const { body, param, query, validationResult } = require('express-validator');
 const {
   ALLOWED_AUDIENCES,
@@ -1511,18 +1512,22 @@ router.get('/health', async (req, res, next) => {
     ]);
 
     const demoFallbackEnabled = process.env.DEMO_FALLBACK_ENABLED !== 'false' && process.env.DEMO_MODE === 'true';
-    const psgcHealth = await psgcClient.checkHealth({ forceRefresh: req.query.refresh === 'true' });
+    const [psgcHealth, holidayHealth] = await Promise.all([
+      psgcClient.checkHealth({ forceRefresh: req.query.refresh === 'true' }),
+      holidayClient.checkHealth({ forceRefresh: req.query.refresh === 'true' })
+    ]);
 
     res.json({
       success: true,
       data: {
-        status: dbReachable && psgcHealth.reachable ? 'HEALTHY' : 'DEGRADED',
+        status: dbReachable && psgcHealth.reachable && holidayHealth.reachable ? 'HEALTHY' : 'DEGRADED',
         checkedAt: new Date().toISOString(),
         databaseReachable: dbReachable,
         databaseLatencyMs: dbLatencyMs,
         sandboxMode: platformCfg ? platformCfg.sandboxMode : true,
         sandboxProviderReachable: true,
         psgcHealth,
+        holidayHealth,
         demoFallbackEnabled,
         lastWebhookReceivedAt: lastWebhook?.receivedAt || null,
         lastWebhookStatus: lastWebhook?.status || null,

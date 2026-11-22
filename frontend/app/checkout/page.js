@@ -12,6 +12,7 @@ import {
 } from '../../lib/api';
 import PhilippineAddressPicker from '../../components/PhilippineAddressPicker';
 import InlineFieldError from '../../components/InlineFieldError';
+import DeliveryEstimateBanner from '../../components/DeliveryEstimateBanner';
 import {
   EMAIL_POLICY,
   formatPhMobileInput,
@@ -528,6 +529,11 @@ export default function CheckoutPage() {
               />
               <InlineFieldError id="notes-err" error={fieldErrors.notes} />
             </div>
+            <DeliveryEstimateBanner
+              regionCode={form.regionCode}
+              province={form.province}
+              city={form.city}
+            />
             <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
               <button type="button" className="btn btn-outline" onClick={() => setStep(0)}>Back</button>
               <button type="submit" className="btn btn-primary btn-lg" style={{ flex: 1 }}>
@@ -561,6 +567,14 @@ export default function CheckoutPage() {
                   🏷️ Promo Code Applied: {form.promotionCode}
                 </p>
               )}
+              <div style={{ marginTop: 'var(--space-3)' }}>
+                <DeliveryEstimateBanner
+                  regionCode={form.regionCode}
+                  province={form.province}
+                  city={form.city}
+                  compact
+                />
+              </div>
             </div>
 
             <div style={{ background: 'var(--color-surface)', borderRadius: 'var(--radius-lg)', padding: 'var(--space-6)', marginBottom: 'var(--space-6)', border: '1px solid var(--color-border)' }}>

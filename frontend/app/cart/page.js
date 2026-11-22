@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { getCart, updateCartItem, removeCartItem } from '../../lib/api';
 import HeaderAuthActions from '../../components/HeaderAuthActions';
 import InlineFieldError from '../../components/InlineFieldError';
+import DeliveryEstimateBanner from '../../components/DeliveryEstimateBanner';
 import { validateOptionalText } from '../../lib/validation';
 
 export default function CartPage() {
@@ -309,6 +310,10 @@ export default function CartPage() {
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--text-xl)', fontWeight: 800, margin: 'var(--space-4) 0' }}>
                 <span>Estimated Total</span>
                 <span>₱{(grandTotalCentavos / 100).toFixed(2)}</span>
+              </div>
+
+              <div style={{ marginBottom: 'var(--space-4)' }}>
+                <DeliveryEstimateBanner compact />
               </div>
 
               <Link href="/checkout" className="btn btn-primary btn-full btn-lg" style={{ textAlign: 'center' }}>

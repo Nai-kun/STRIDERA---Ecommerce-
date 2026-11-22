@@ -1,0 +1,60 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: stridera-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-stridera}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      - stridera_pgdata:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d stridera"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: stridera-python-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 5000
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-stridera}
+      JWT_SECRET: ${JWT_SECRET:-stridera-dev-secret-change-in-production}
+      FRONTEND_URL: http://localhost:3000
+      DEMO_MODE: "false"
+      PSGC_API_BASE_URL: https://psgc.gitlab.io/api
+      HOLIDAY_API_BASE_URL: https://date.nager.at/api/v3
+      HOLIDAY_COUNTRY_CODE: PH
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./backend/public/uploads:/app/backend/public/uploads
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: stridera-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      PORT: 3000
+      NEXT_PUBLIC_API_URL: /api
+      BACKEND_INTERNAL_URL: http://backend:5000
+    ports:
+      - "3000:3000"
+
+volumes:
+  stridera_pgdata:

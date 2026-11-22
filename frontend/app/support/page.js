@@ -418,6 +418,11 @@ export default function CustomerSupportPortalPage() {
                   </div>
                   <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: '4px' }}>
                     Payment Status: <strong>{o.paymentStatus}</strong> | Shipping Status: <strong>{o.shippingStatus}</strong>
+                    {o.estimatedDeliveryStart && o.estimatedDeliveryEnd && (
+                      <span>
+                        {' '}| Est. Delivery: <strong>{o.estimatedDeliveryStart} – {o.estimatedDeliveryEnd}</strong> ({o.deliveryZone || 'PH'} • {o.deliveryScheduleSource})
+                      </span>
+                    )}
                   </div>
                   {o.payments?.map(p => (
                     <div key={p.id} style={{ fontSize: 'var(--text-xs)', marginTop: '4px' }}>

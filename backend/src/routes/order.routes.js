@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
 const psgcClient = require('../services/psgcClient');
+const holidayClient = require('../services/holidayClient');
 const { authenticate, optionalAuth } = require('../middleware/auth.middleware');
 const { createError } = require('../middleware/error.middleware');
 const {
@@ -125,6 +126,12 @@ router.post('/', optionalAuth, async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Cart is empty' });
     }
 
+    const deliveryEstimate = await holidayClient.calculateDeliveryEstimate({
+      regionCode: resolvedRegionCode,
+      province: resolvedShippingProvince,
+      city: resolvedShippingCity
+    });
+
     const result = await prisma.$transaction(async (tx) => {
       let subtotalCentavos = 0;
       const orderItems = [];
@@ -238,6 +245,11 @@ router.post('/', optionalAuth, async (req, res, next) => {
           shippingAddressSource: resolvedAddressSource,
           shippingPostalCode,
           shippingCountry: shippingCountry || 'PH',
+          estimatedDeliveryStart: deliveryEstimate.estimatedDeliveryStart,
+          estimatedDeliveryEnd: deliveryEstimate.estimatedDeliveryEnd,
+          deliveryZone: deliveryEstimate.zoneLabel,
+          deliveryScheduleSource: deliveryEstimate.source,
+          deliveryHolidaysObserved: deliveryEstimate.holidaysInWindow,
           promotionId,
           notes: notes || null,
           items: {

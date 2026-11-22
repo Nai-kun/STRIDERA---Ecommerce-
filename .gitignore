@@ -28,6 +28,12 @@ pgdata/
 */pgdata/
 backups/
 
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
 # OS Files
 .DS_Store
 Thumbs.db

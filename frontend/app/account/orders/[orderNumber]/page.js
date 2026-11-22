@@ -305,6 +305,22 @@ export default function OrderDetailPage() {
                   ✓ PSGC Verified ({order.shippingCityCode}{order.shippingBarangayCode ? ` • ${order.shippingBarangayCode}` : ''})
                 </span>
               )}
+              {order.estimatedDeliveryStart && order.estimatedDeliveryEnd && (
+                <span style={{ display: 'block', marginTop: 8, padding: '8px 10px', borderRadius: 8, background: 'rgba(74, 144, 196, 0.08)', border: '1px solid rgba(74, 144, 196, 0.3)', fontSize: '12px', color: 'var(--color-text)' }}>
+                  <strong>📅 Estimated Delivery Window:</strong> {order.estimatedDeliveryStart} to {order.estimatedDeliveryEnd}
+                  {order.deliveryZone && <span> ({order.deliveryZone})</span>}
+                  {order.deliveryScheduleSource === 'NAGER_PH_HOLIDAYS' ? (
+                    <span style={{ marginLeft: 6, color: '#166534', fontWeight: 700 }}>✓ PH Holidays Checked</span>
+                  ) : (
+                    <span style={{ marginLeft: 6, color: '#92400E', fontWeight: 600 }}>(Fallback Schedule)</span>
+                  )}
+                  {Array.isArray(order.deliveryHolidaysObserved) && order.deliveryHolidaysObserved.length > 0 && (
+                    <span style={{ display: 'block', marginTop: 3, color: '#1D4ED8' }}>
+                      Holidays observed in window: {order.deliveryHolidaysObserved.map(h => `${h.name} (${h.date})`).join(', ')}
+                    </span>
+                  )}
+                </span>
+              )}
             </p>
 
             <h3 style={{ fontSize: 'var(--text-sm)', fontWeight: 700, marginBottom: 'var(--space-3)' }}>Summary</h3>

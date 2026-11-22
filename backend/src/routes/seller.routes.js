@@ -937,7 +937,12 @@ router.get('/orders', async (req, res, next) => {
               shippingCity: true,
               shippingProvince: true,
               shippingPostalCode: true,
-              shippingCountry: true
+              shippingCountry: true,
+              estimatedDeliveryStart: true,
+              estimatedDeliveryEnd: true,
+              deliveryZone: true,
+              deliveryScheduleSource: true,
+              deliveryHolidaysObserved: true
             }
           },
           items: {

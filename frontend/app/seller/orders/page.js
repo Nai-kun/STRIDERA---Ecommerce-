@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { getSellerOrders, acceptSellerOrder, fulfillSellerOrder, cancelSellerOrder } from '../../../lib/api';
+import { getSellerOrders, acceptSellerOrder, fulfillSellerOrder, cancelSellerOrder, getPhilippineHolidays } from '../../../lib/api';
 import InlineFieldError from '../../../components/InlineFieldError';
 import {
   validateRequiredText,
@@ -21,6 +21,7 @@ export default function SellerOrdersPage() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
+  const [upcomingHolidays, setUpcomingHolidays] = useState([]);
   const [notification, setNotification] = useState(null);
 
   // Modal states
@@ -59,6 +60,16 @@ export default function SellerOrdersPage() {
   useEffect(() => {
     loadOrders();
   }, [statusFilter]);
+
+  useEffect(() => {
+    getPhilippineHolidays()
+      .then((res) => {
+        if (res?.success && Array.isArray(res?.data?.upcoming)) {
+          setUpcomingHolidays(res.data.upcoming);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const handleAccept = async (orderId) => {
     try {
@@ -179,6 +190,19 @@ export default function SellerOrdersPage() {
           <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>
             Accept, prepare, and dispatch orders for your brand items. Dispatches create a shipment record for Delivery Personnel.
           </p>
+          {upcomingHolidays.length > 0 && (
+            <div style={{
+              marginTop: 'var(--space-3)',
+              padding: 'var(--space-3) var(--space-4)',
+              borderRadius: 'var(--radius-md)',
+              background: 'rgba(74, 144, 196, 0.08)',
+              border: '1px solid rgba(74, 144, 196, 0.3)',
+              fontSize: 'var(--text-xs)'
+            }}>
+              <strong>📅 PH Holiday Dispatch Calendar (Nager.Date):</strong>{' '}
+              {upcomingHolidays.slice(0, 3).map(h => `${h.name} (${h.date})`).join(' • ')}
+            </div>
+          )}
         </div>
 
         {/* Filter Tabs */}
@@ -235,6 +259,9 @@ export default function SellerOrdersPage() {
 
                     <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
                       Placed: {new Date(slice.createdAt).toLocaleString()} | Destination: {slice.order?.shippingCity}, {slice.order?.shippingProvince}
+                      {slice.order?.estimatedDeliveryStart && slice.order?.estimatedDeliveryEnd && (
+                        <span> | Target Delivery: <strong>{slice.order.estimatedDeliveryStart} – {slice.order.estimatedDeliveryEnd}</strong> ({slice.order.deliveryZone || 'PH'})</span>
+                      )}
                     </div>
                   </div>
 

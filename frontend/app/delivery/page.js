@@ -8,6 +8,7 @@ import {
   collectDeliveryShipment,
   updateDeliveryShipmentStatus,
   failDeliveryShipment,
+  getPhilippineHolidays,
   logout
 } from '../../lib/api';
 import InlineFieldError from '../../components/InlineFieldError';
@@ -28,6 +29,7 @@ export default function DeliveryPersonnelPortalPage() {
   const [shipments, setShipments] = useState([]);
   const [summary, setSummary] = useState(null);
   const [statusFilter, setStatusFilter] = useState('');
+  const [upcomingHolidays, setUpcomingHolidays] = useState([]);
   const [loading, setLoading] = useState(true);
   const [notification, setNotification] = useState(null);
 
@@ -66,6 +68,16 @@ export default function DeliveryPersonnelPortalPage() {
   useEffect(() => {
     loadShipments();
   }, [statusFilter]);
+
+  useEffect(() => {
+    getPhilippineHolidays()
+      .then((res) => {
+        if (res?.success && Array.isArray(res?.data?.upcoming)) {
+          setUpcomingHolidays(res.data.upcoming);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const handleAccept = async (id) => {
     try {
@@ -222,6 +234,19 @@ export default function DeliveryPersonnelPortalPage() {
           <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>
             Accept delivery assignments, collect packages from sellers, update transit milestones, and record Proof of Delivery (FR-7.1–FR-7.11).
           </p>
+          {upcomingHolidays.length > 0 && (
+            <div style={{
+              marginTop: 'var(--space-3)',
+              padding: 'var(--space-3) var(--space-4)',
+              borderRadius: 'var(--radius-md)',
+              background: 'rgba(74, 144, 196, 0.08)',
+              border: '1px solid rgba(74, 144, 196, 0.3)',
+              fontSize: 'var(--text-xs)'
+            }}>
+              <strong>📅 Upcoming PH Courier Holidays (Nager.Date):</strong>{' '}
+              {upcomingHolidays.slice(0, 3).map(h => `${h.name} (${h.date})`).join(' • ')}
+            </div>
+          )}
         </div>
 
         {/* Summary KPIs */}
@@ -310,6 +335,11 @@ export default function DeliveryPersonnelPortalPage() {
                     <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
                       📍 {s.order?.shippingAddressLine1}, {s.order?.shippingCity}, {s.order?.shippingProvince} {s.order?.shippingPostalCode}
                     </div>
+                    {s.order?.estimatedDeliveryStart && s.order?.estimatedDeliveryEnd && (
+                      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-brand-primary)', marginTop: '4px', fontWeight: 600 }}>
+                        📅 Target Delivery: {s.order.estimatedDeliveryStart} – {s.order.estimatedDeliveryEnd} ({s.order.deliveryZone || 'PH'})
+                      </div>
+                    )}
                     {s.order?.notes && (
                       <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-brand-primary)', marginTop: '4px' }}>
                         Note: "{s.order.notes}"

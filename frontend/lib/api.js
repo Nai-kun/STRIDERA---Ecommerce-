@@ -278,3 +278,19 @@ export const getPsgcBarangays = (cityCode) =>
   apiFetch(`/locations/cities/${encodeURIComponent(cityCode)}/barangays`);
 export const validatePsgcAddress = (payload) =>
   apiFetch('/locations/validate', { method: 'POST', body: JSON.stringify(payload) });
+
+// Philippine Public Holidays & Holiday-Aware Delivery Schedule API (Nager.Date)
+export const getDeliveryEstimate = (params = {}) => {
+  const clean = {};
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && String(v).trim() !== '') {
+      clean[k] = String(v).trim();
+    }
+  }
+  const qs = new URLSearchParams(clean).toString();
+  return apiFetch(`/schedule/delivery-estimate${qs ? '?' + qs : ''}`);
+};
+export const getPhilippineHolidays = (year) =>
+  apiFetch(`/schedule/holidays${year ? `?year=${encodeURIComponent(year)}` : ''}`);
+export const getScheduleHealth = (refresh = false) =>
+  apiFetch(`/schedule/health${refresh ? '?refresh=true' : ''}`);

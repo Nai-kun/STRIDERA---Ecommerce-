@@ -1,65 +1,132 @@
 # STRIDERA — Multi-Seller Footwear E-Commerce & 7-Role Enterprise Operations Platform
 
-STRIDERA is a full-stack multi-seller footwear marketplace built with **Next.js 16 (App Router)**, **Express.js 5**, **Prisma ORM 7**, and **PostgreSQL (Embedded PGlite)**, engineered to fulfill `source/IPT.pdf` (`FR-1.1`–`FR-10.10`, `NFR-1`–`NFR-36`) and integrated with the live **PSGC Philippine Address API** (`https://psgc.gitlab.io/api`).
+STRIDERA is a full-stack multi-seller footwear marketplace built with a **Python 3.12 + FastAPI + SQLAlchemy 2.0 ORM** back-end (`python_backend/`), **PostgreSQL** (`stridera`, 24 relational tables + 18 enums), and a **Next.js 16 (App Router)** storefront (`frontend/`), integrated with two live, zero-key public HTTPS REST APIs:
+
+1. **PSGC Philippine Address API** (`https://psgc.gitlab.io/api`) — Live Region → Province → City/Municipality → Barangay cascading lookups & strict server-side address verification.
+2. **Nager.Date Public Holidays API** (`https://date.nager.at/api/v3`) — Official Philippine public holidays calendar (`PH`) driving a Manila-timezone courier business-day delivery ETA engine (`NCR`: 2–3 business days vs `Provincial Philippines`: 4–6 business days).
+
+---
+
+## Project Architecture
+
+```text
+STRIDERA---Ecommerce-/
+├── python_backend/                # Modular Python FastAPI Back-End (:5000)
+│   ├── app/
+│   │   ├── main.py                # FastAPI app, OpenAPI (/docs), CORS, error handlers, static mounts
+│   │   ├── core/
+│   │   │   ├── config.py          # Environment loader & normalized PostgreSQL DSN
+│   │   │   ├── database.py        # SQLAlchemy 2.0 engine, SessionLocal & DB health check
+│   │   │   ├── security.py        # Argon2 password hashing, PyJWT + SHA-256 session cookies, 7-role RBAC
+│   │   │   ├── validators.py      # Authoritative PH mobile (+63 9XX-XXX-YYYY), email, SKU, price & stock rules
+│   │   │   └── serializers.py     # CamelCase JSON serializers matching Next.js contracts
+│   │   ├── models/models.py       # Complete SQLAlchemy 2.0 ORM definitions (24 tables + 18 PostgreSQL enums)
+│   │   ├── services/
+│   │   │   ├── psgc_client.py     # Async httpx PSGC API client with 24h TTL cache, retries & hierarchy check
+│   │   │   ├── holiday_client.py  # Async httpx Nager.Date PH Holidays client & delivery ETA calculator
+│   │   │   ├── payment_finalizer.py # Atomic stock verification, decrement & ledger finalization
+│   │   │   └── image_upload.py    # Magic-byte PNG/JPEG/WEBP validation (max 2MB)
+│   │   └── routers/               # 16 modular FastAPI routers (/api/*)
+│   ├── tests/                     # Pytest unit, external API & full E2E integration tests
+│   ├── init_db.py                 # Pure-Python PostgreSQL schema & config initializer
+│   └── run.py                     # Uvicorn CLI runner
+├── frontend/                      # Next.js 16 Storefront & 7-Role Enterprise UI (:3000)
+├── database/                      # PostgreSQL schema (schema.sql), migrations & seed script
+├── scripts/start-vm.sh            # Linux / VirtualBox VM one-command launcher
+├── Dockerfile.backend             # Python 3.12 FastAPI container image
+├── Dockerfile.frontend            # Node 20 Next.js container image
+├── docker-compose.yml             # Multi-container PostgreSQL + FastAPI + Next.js orchestration
+├── requirements.txt               # Pinned Python dependencies
+└── API_DOCUMENTATION.md           # Full REST endpoints & payload reference
+```
+
+---
+
+## Quick Start (Python Virtual Environment `.venv` on Localhost)
+
+### 1. Create & Activate Python `.venv` + Install Dependencies
+```powershell
+# Windows PowerShell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+```bash
+# Linux / macOS
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 2. Configure Environment & Start PostgreSQL
+Copy `backend/.env.example` to `backend/.env` if needed (`DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/stridera`).
+
+- If using native PostgreSQL or Docker Postgres, ensure database `stridera` is running on port `5432`.
+- Or use the included zero-install PGlite PostgreSQL daemon (`cd backend && node db-server.js`).
+
+Verify/initialize schema via Python:
+```powershell
+python -m python_backend.init_db
+```
+
+### 3. Run Python FastAPI Back-End (`:5000`) & Next.js Front-End (`:3000`)
+```powershell
+# Terminal 1 — Python FastAPI API + Swagger UI
+.\.venv\Scripts\python.exe -m python_backend.run
+
+# Terminal 2 — Next.js Frontend (proxies /api/* -> http://127.0.0.1:5000/api/*)
+cd frontend
+npm run dev
+```
+
+*(Windows users can also double-click `start-all.bat` to launch PostgreSQL, Python FastAPI, and Next.js automatically.)*
+
+- **Storefront UI:** http://localhost:3000
+- **FastAPI Backend:** http://localhost:5000
+- **Interactive Swagger API Docs:** http://localhost:5000/docs
+- **ReDoc API Reference:** http://localhost:5000/redoc
+- **System Health:** http://localhost:5000/api/health
+
+---
+
+## Virtual Machine & Containerized Setup (Docker / Linux VM)
+
+### Option A: Docker Compose (`PostgreSQL 16` + `Python FastAPI` + `Next.js`)
+```bash
+docker compose up --build
+```
+Services expose `localhost:3000` (Next.js), `localhost:5000` (FastAPI + `/docs`), and `localhost:5432` (PostgreSQL).
+
+### Option B: Linux Virtual Machine (VirtualBox / Ubuntu / WSL2)
+```bash
+chmod +x scripts/start-vm.sh
+./scripts/start-vm.sh
+```
+The script automatically bootstraps `.venv`, installs `requirements.txt`, initializes PostgreSQL via `python_backend.init_db`, installs frontend packages if missing, and binds both services to `0.0.0.0` (`3000` and `5000`) for clean host-to-guest VM port forwarding.
 
 ---
 
 ## 7 User Roles & Dedicated Portals
 
-| Role | Enum | Email | Portal Route | Key Capabilities |
-| :--- | :--- | :--- | :--- | :--- |
-| **1. Shopper** | `CUSTOMER` | `demo@stridera.ph` | `/`, `/shop`, `/checkout`, `/account/profile` | Browse multi-seller catalog, filter by size/color/seller/price, live PSGC Philippine address lookup, sandbox e-wallet checkout (GCash, Maya, PayPal), confirm receipt, reviews, support tickets |
-| **2. Seller** | `SELLER` | `seller@stridera.ph`, `sole@stridera.ph` | `/seller/dashboard`, `/seller/products`, `/seller/orders` | Store profile, product/SKU CRUD, image upload, accept & fulfill paid order slices, courier tracking, net earnings |
-| **3. Administrator** | `ADMIN` | `admin@stridera.ph` | `/admin/dashboard` | Executive KPIs, 7-role user governance, seller verification, brand governance, PSGC health & audit logs |
-| **4. Inventory Manager** | `INVENTORY_MANAGER` | `inventory@stridera.ph` | `/inventory` | Warehouse SKU monitor, low-stock alerts, incoming restocks, outgoing dispatches, manual adjustments, movement audit log |
-| **5. Delivery Personnel** | `DELIVERY_PERSONNEL` | `delivery@stridera.ph` | `/delivery` | Courier manifest, customer delivery details, accept assignment, confirm seller pickup, transit updates, Proof of Delivery (POD) |
-| **6. Customer Support** | `CUSTOMER_SUPPORT` | `support@stridera.ph` | `/support` | Support ticket queue, order/payment/shipment diagnostic lookup, ticket replies, cancellation/return approval, refund escalation |
-| **7. Finance Officer** | `FINANCE_OFFICER` | `finance@stridera.ph` | `/finance` | E-wallet payment reference verification, `5%` platform commission breakdown, seller payout settlement, refund processing, financial report |
+| Role | Enum | Portal Route | Key Capabilities |
+| :--- | :--- | :--- | :--- |
+| **1. Shopper** | `CUSTOMER` | `/`, `/shop`, `/checkout`, `/account/orders` | Browse multi-seller catalog, filter by size/color/seller/price, live PSGC PH address lookup, Holiday delivery ETA, sandbox e-wallet checkout (GCash, Maya, PayPal), confirm receipt, reviews, support tickets |
+| **2. Seller** | `SELLER` | `/seller/dashboard`, `/seller/products`, `/seller/orders` | Store profile, product/SKU CRUD, validated image upload, accept & fulfill paid order slices, courier tracking, net earnings |
+| **3. Administrator** | `ADMIN` | `/admin/dashboard` | Executive KPIs, 7-role user governance (with self-lockout protection), seller approval, brand governance, encrypted settings & live PSGC/Holiday health diagnostics |
+| **4. Inventory Manager** | `INVENTORY_MANAGER` | `/inventory` | Warehouse SKU monitor, low-stock alerts, incoming restocks, outgoing dispatches, manual adjustments & movement audit log |
+| **5. Delivery Personnel** | `DELIVERY_PERSONNEL` | `/delivery` | Courier manifest, delivery zone & holiday ETA awareness, accept assignment, confirm seller pickup, transit updates, Proof of Delivery (POD) |
+| **6. Customer Support** | `CUSTOMER_SUPPORT` | `/support` | Support ticket queue, order/payment/shipment diagnostic lookup, ticket replies, cancellation/return approval & refund escalation |
+| **7. Finance Officer** | `FINANCE_OFFICER` | `/finance` | Payment verification, `5%` platform commission breakdown, seller payout settlement, refund processing & financial report |
 
-*(Demo credentials are seeded by `database/seeds/seed.js` for local evaluation only.)*
-
----
-
-## PSGC Philippine Address API (Cascading Address Lookup & Verification)
-
-STRIDERA integrates the live **Philippine Standard Geographic Code (PSGC) API** (`https://psgc.gitlab.io/api`, PSA official divisions — **no API key required**) through a dedicated server-side client (`backend/src/services/psgcClient.js`) and backend proxy (`/api/locations/*`):
-
-- **Cascading UI:** Checkout Step 2 (`Shipping`), Customer Profile (`Add New Address`), and Order Details display `Region → Province → City/Municipality → Barangay`, automatically handling regions without provinces (such as **NCR / Metro Manila**).
-- **24-Hour Server-Side Caching & Resilience:** Responses are cached in memory (`PSGC_CACHE_TTL_MS=86400000`), bounded by `PSGC_TIMEOUT_MS=8000` timeouts and `PSGC_MAX_RETRIES=2` exponential retries.
-- **Server-Side Validation:** When PSGC codes are submitted to `POST /api/orders` or `POST /api/auth/addresses`, the backend validates the full hierarchy against PSGC and overwrites browser-supplied names with canonical PSGC names (`addressSource = PSGC_VERIFIED`).
-- **Honest Manual Fallback:** If the upstream PSGC API is unreachable or times out, checkout and profile forms explicitly switch to **Manual Address Fallback** (`MANUAL_FALLBACK`) instead of blocking shoppers or returning fake locations.
-- **Health Diagnostics:** Admin **System Health Diagnostics** (`GET /api/admin/health`) probes `GET /regions.json` live and reports latency, region count, and cache hit metrics.
-
-Optional environment overrides in `backend/.env`:
-```env
-PSGC_API_BASE_URL=https://psgc.gitlab.io/api
-PSGC_TIMEOUT_MS=8000
-PSGC_MAX_RETRIES=2
-PSGC_CACHE_TTL_MS=86400000
-```
+*(Seed accounts are provisioned via `database/seeds/seed.js` for evaluation; see `API_DOCUMENTATION.md` for full endpoint specs.)*
 
 ---
 
-## Quick Start
+## Automated Testing (`pytest`)
+
+Run the Python FastAPI unit, external API, and PostgreSQL integration test suite inside `.venv`:
 
 ```powershell
-# 1. Start Embedded PostgreSQL Server (applies schema + additive migrations; add --seed on first setup)
-cd backend
-node db-server.js
-
-# 2. Start Backend API (http://127.0.0.1:5000)
-cd backend
-npm start
-
-# 3. Start Frontend App (http://127.0.0.1:3000)
-cd frontend
-npm run dev
-```
-
----
-
-## Automated Testing
-
-```powershell
-node --test tests/functional.test.js tests/security.test.js tests/revision.test.js tests/psgc.test.js
+.\.venv\Scripts\pytest.exe python_backend/tests -v
 ```
