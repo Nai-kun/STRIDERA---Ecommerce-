@@ -13,6 +13,19 @@ import {
   getInventoryReport,
   logout
 } from '../../lib/api';
+import InlineFieldError from '../../components/InlineFieldError';
+import {
+  validateStock,
+  validateQuantity,
+  validateRequiredText,
+  focusFirstInvalidField
+} from '../../lib/validation';
+
+const INV_ACTION_FIELD_IDS = {
+  newQuantity: 'inv-new-qty',
+  quantity: 'inv-qty',
+  reason: 'inv-reason'
+};
 
 export default function InventoryManagerPortalPage() {
   const [activeTab, setActiveTab] = useState('variants');
@@ -30,6 +43,8 @@ export default function InventoryManagerPortalPage() {
   // Modal for Incoming / Outgoing / Adjustment
   const [actionModal, setActionModal] = useState({ open: false, type: '', variant: null });
   const [actionForm, setActionForm] = useState({ quantity: 10, newQuantity: 10, reason: '', reference: '' });
+  const [actionErrors, setActionErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
 
   const notify = (msg, isError = false) => {
     setNotification({ msg, isError });
@@ -66,6 +81,7 @@ export default function InventoryManagerPortalPage() {
   }, [stockStatus]);
 
   const openModal = (type, variant) => {
+    setActionErrors({});
     setActionModal({ open: true, type, variant });
     setActionForm({
       quantity: 10,
@@ -78,36 +94,62 @@ export default function InventoryManagerPortalPage() {
   const handleActionSubmit = async (e) => {
     e.preventDefault();
     const { type, variant } = actionModal;
-    if (!variant) return;
-    const skuLabel = variant.variantSku || variant.sku;
+    if (!variant || submitting) return;
 
+    const reasonRes = validateRequiredText(actionForm.reason, 'Reason / Audit Note', { min: 2, max: 200 });
+    const nextErrors = { ...(reasonRes.valid ? {} : { reason: reasonRes.error }) };
+
+    let parsedQty = null;
+    let parsedNewQty = null;
+    if (type === 'ADJUST') {
+      const stockRes = validateStock(actionForm.newQuantity);
+      if (!stockRes.valid) nextErrors.newQuantity = stockRes.error;
+      else parsedNewQty = stockRes.value;
+    } else {
+      const maxCap = type === 'OUTGOING' ? variant.stockQuantity : 9999;
+      const qtyRes = validateQuantity(actionForm.quantity, maxCap);
+      if (!qtyRes.valid) nextErrors.quantity = qtyRes.error;
+      else parsedQty = qtyRes.value;
+    }
+
+    setActionErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      focusFirstInvalidField(nextErrors, INV_ACTION_FIELD_IDS);
+      return;
+    }
+
+    const skuLabel = variant.variantSku || variant.sku;
+    setSubmitting(true);
     try {
       if (type === 'INCOMING') {
         await recordIncomingStock({
           variantId: variant.id,
-          quantity: Number(actionForm.quantity),
-          reason: `${actionForm.reason} (${actionForm.reference})`
+          quantity: parsedQty,
+          reason: `${reasonRes.value} (${actionForm.reference})`
         });
-        notify(`Recorded +${actionForm.quantity} incoming units for ${skuLabel}`);
+        notify(`Recorded +${parsedQty} incoming units for ${skuLabel}`);
       } else if (type === 'OUTGOING') {
         await recordOutgoingStock({
           variantId: variant.id,
-          quantity: Number(actionForm.quantity),
-          reason: `${actionForm.reason} (${actionForm.reference})`
+          quantity: parsedQty,
+          reason: `${reasonRes.value} (${actionForm.reference})`
         });
-        notify(`Recorded -${actionForm.quantity} outgoing units for ${skuLabel}`);
+        notify(`Recorded -${parsedQty} outgoing units for ${skuLabel}`);
       } else if (type === 'ADJUST') {
-        const delta = Number(actionForm.newQuantity) - variant.stockQuantity;
+        const delta = parsedNewQty - variant.stockQuantity;
         await adjustInventoryVariant(variant.id, {
           quantityChange: delta,
-          reason: actionForm.reason
+          reason: reasonRes.value
         });
-        notify(`Adjusted stock of ${skuLabel} to ${actionForm.newQuantity} units`);
+        notify(`Adjusted stock of ${skuLabel} to ${parsedNewQty} units`);
       }
+      setActionErrors({});
       setActionModal({ open: false, type: '', variant: null });
       loadAll();
     } catch (err) {
       notify(err.message || 'Stock movement failed', true);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -432,48 +474,79 @@ export default function InventoryManagerPortalPage() {
               SKU: <strong>{actionModal.variant?.variantSku || actionModal.variant?.sku}</strong> (Current Stock: {actionModal.variant?.stockQuantity} units)
             </p>
 
-            <form onSubmit={handleActionSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+            <form onSubmit={handleActionSubmit} noValidate style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
               {actionModal.type === 'ADJUST' ? (
                 <div>
-                  <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>New Exact Stock Quantity (≥ 0)</label>
+                  <label htmlFor="inv-new-qty" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>New Exact Stock Quantity (≥ 0) *</label>
                   <input
+                    id="inv-new-qty"
                     type="number"
                     min="0"
                     required
+                    aria-required="true"
+                    aria-invalid={Boolean(actionErrors.newQuantity)}
+                    aria-describedby={actionErrors.newQuantity ? 'inv-new-qty-error' : undefined}
                     value={actionForm.newQuantity}
-                    onChange={e => setActionForm({ ...actionForm, newQuantity: e.target.value })}
-                    style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                    onChange={e => {
+                      setActionForm({ ...actionForm, newQuantity: e.target.value });
+                      if (actionErrors.newQuantity) setActionErrors(prev => ({ ...prev, newQuantity: null }));
+                    }}
+                    onBlur={e => setActionErrors(prev => ({ ...prev, newQuantity: validateStock(e.target.value).error }))}
+                    style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: `1px solid ${actionErrors.newQuantity ? 'var(--color-error)' : 'var(--color-border)'}` }}
                   />
+                  <InlineFieldError id="inv-new-qty-error" error={actionErrors.newQuantity} />
                 </div>
               ) : (
                 <div>
-                  <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Quantity to {actionModal.type === 'INCOMING' ? 'Add' : 'Deduct'}</label>
+                  <label htmlFor="inv-qty" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Quantity to {actionModal.type === 'INCOMING' ? 'Add' : 'Deduct'} *</label>
                   <input
+                    id="inv-qty"
                     type="number"
                     min="1"
                     max={actionModal.type === 'OUTGOING' ? actionModal.variant?.stockQuantity : 9999}
                     required
+                    aria-required="true"
+                    aria-invalid={Boolean(actionErrors.quantity)}
+                    aria-describedby={actionErrors.quantity ? 'inv-qty-error' : undefined}
                     value={actionForm.quantity}
-                    onChange={e => setActionForm({ ...actionForm, quantity: e.target.value })}
-                    style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                    onChange={e => {
+                      setActionForm({ ...actionForm, quantity: e.target.value });
+                      if (actionErrors.quantity) setActionErrors(prev => ({ ...prev, quantity: null }));
+                    }}
+                    onBlur={e => setActionErrors(prev => ({
+                      ...prev,
+                      quantity: validateQuantity(e.target.value, actionModal.type === 'OUTGOING' ? actionModal.variant?.stockQuantity : 9999).error
+                    }))}
+                    style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: `1px solid ${actionErrors.quantity ? 'var(--color-error)' : 'var(--color-border)'}` }}
                   />
+                  <InlineFieldError id="inv-qty-error" error={actionErrors.quantity} />
                 </div>
               )}
 
               <div>
-                <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Reason / Audit Note</label>
+                <label htmlFor="inv-reason" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Reason / Audit Note *</label>
                 <input
+                  id="inv-reason"
                   type="text"
                   required
+                  aria-required="true"
+                  maxLength={200}
+                  aria-invalid={Boolean(actionErrors.reason)}
+                  aria-describedby={actionErrors.reason ? 'inv-reason-error' : undefined}
                   value={actionForm.reason}
-                  onChange={e => setActionForm({ ...actionForm, reason: e.target.value })}
-                  style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                  onChange={e => {
+                    setActionForm({ ...actionForm, reason: e.target.value });
+                    if (actionErrors.reason) setActionErrors(prev => ({ ...prev, reason: null }));
+                  }}
+                  onBlur={e => setActionErrors(prev => ({ ...prev, reason: validateRequiredText(e.target.value, 'Reason / Audit Note', { min: 2, max: 200 }).error }))}
+                  style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: `1px solid ${actionErrors.reason ? 'var(--color-error)' : 'var(--color-border)'}` }}
                 />
+                <InlineFieldError id="inv-reason-error" error={actionErrors.reason} />
               </div>
 
               <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end' }}>
-                <button type="button" className="btn btn-ghost" onClick={() => setActionModal({ open: false, type: '', variant: null })}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Confirm Stock Update</button>
+                <button type="button" className="btn btn-ghost" onClick={() => { setActionModal({ open: false, type: '', variant: null }); setActionErrors({}); }}>Cancel</button>
+                <button type="submit" disabled={submitting} className="btn btn-primary">{submitting ? 'Saving…' : 'Confirm Stock Update'}</button>
               </div>
             </form>
           </div>

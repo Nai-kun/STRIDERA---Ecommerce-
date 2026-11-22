@@ -3,6 +3,22 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { registerSeller } from '../../../lib/api';
+import {
+  EMAIL_POLICY,
+  formatPhMobileInput,
+  handlePhMobileKeyDown,
+  normalizePhMobile,
+  validateEmail,
+  validatePersonName,
+  validateEntityName,
+  validateOptionalText,
+  validateRequiredText,
+  validateOptionalUrl,
+  validatePassword,
+  focusFirstInvalidField
+} from '../../../lib/validation';
+import InlineFieldError from '../../../components/InlineFieldError';
+import PasswordInput from '../../../components/PasswordInput';
 
 export default function SellerRegisterPage() {
   const [form, setForm] = useState({
@@ -17,55 +33,133 @@ export default function SellerRegisterPage() {
     password: '',
     confirmPassword: ''
   });
+  const [fieldErrors, setFieldErrors] = useState({});
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const PH_MOBILE_REGEX = /^\+63 9\d{2}-\d{3}-\d{4}$/;
+  const validateField = (field, rawVal, nextForm = form) => {
+    switch (field) {
+      case 'storeName': {
+        const r = validateEntityName(rawVal, 'Store name', { min: 2, max: 80 });
+        return r.valid ? null : r.error;
+      }
+      case 'storeDescription': {
+        const r = validateOptionalText(rawVal, 'Store description', { max: 1000 });
+        return r.valid ? null : r.error;
+      }
+      case 'storeLogoUrl': {
+        const r = validateOptionalUrl(rawVal, 'Store logo URL');
+        return r.valid ? null : r.error;
+      }
+      case 'identificationDetails': {
+        const r = validateRequiredText(rawVal, 'Business / DTI / TIN ID details', { min: 3, max: 300 });
+        return r.valid ? null : r.error;
+      }
+      case 'firstName': {
+        const r = validatePersonName(rawVal, 'First name');
+        return r.valid ? null : r.error;
+      }
+      case 'lastName': {
+        const r = validatePersonName(rawVal, 'Last name');
+        return r.valid ? null : r.error;
+      }
+      case 'email': {
+        const r = validateEmail(rawVal, { required: true, applyPolicy: true, policy: EMAIL_POLICY });
+        return r.valid ? null : r.error;
+      }
+      case 'phone': {
+        const r = normalizePhMobile(rawVal, { required: true });
+        return r.valid ? null : r.error;
+      }
+      case 'password': {
+        const r = validatePassword(rawVal, { required: true, checkStrength: true });
+        return r.valid ? null : r.error;
+      }
+      case 'confirmPassword': {
+        if (!rawVal) return 'Please confirm your password.';
+        return rawVal === nextForm.password ? null : 'Passwords do not match.';
+      }
+      default:
+        return null;
+    }
+  };
 
-  const formatPhMobile = (raw) => {
-    let digits = raw.replace(/\D/g, '');
-    if (digits.startsWith('63')) digits = digits.slice(2);
-    else if (digits.startsWith('0')) digits = digits.slice(1);
-    digits = digits.slice(0, 10);
-    let formatted = digits.slice(0, 3);
-    if (digits.length > 3) formatted += '-' + digits.slice(3, 6);
-    if (digits.length > 6) formatted += '-' + digits.slice(6, 10);
-    return '+63 ' + formatted;
+  const setField = (k, v) => {
+    setForm(prev => {
+      const next = { ...prev, [k]: v };
+      if (fieldErrors[k]) {
+        setFieldErrors(fe => ({ ...fe, [k]: validateField(k, v, next) }));
+      }
+      if (k === 'password' && prev.confirmPassword && fieldErrors.confirmPassword) {
+        setFieldErrors(fe => ({ ...fe, confirmPassword: validateField('confirmPassword', prev.confirmPassword, next) }));
+      }
+      return next;
+    });
+  };
+
+  const handleBlur = (k) => {
+    setFieldErrors(prev => ({ ...prev, [k]: validateField(k, form[k], form) }));
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loading) return;
     setError(null);
 
-    if (!PH_MOBILE_REGEX.test(form.phone)) {
-      setError('Contact mobile number must be in Philippine international format: +63 9XX-XXX-YYYY (e.g. +63 917-123-4567)');
+    const errors = {
+      storeName: validateField('storeName', form.storeName),
+      storeDescription: validateField('storeDescription', form.storeDescription),
+      identificationDetails: validateField('identificationDetails', form.identificationDetails),
+      storeLogoUrl: validateField('storeLogoUrl', form.storeLogoUrl),
+      firstName: validateField('firstName', form.firstName),
+      lastName: validateField('lastName', form.lastName),
+      email: validateField('email', form.email),
+      phone: validateField('phone', form.phone),
+      password: validateField('password', form.password),
+      confirmPassword: validateField('confirmPassword', form.confirmPassword)
+    };
+    setFieldErrors(errors);
+
+    if (Object.values(errors).some(Boolean)) {
+      focusFirstInvalidField(errors, {
+        storeName: 'sr-storeName',
+        storeDescription: 'sr-storeDesc',
+        identificationDetails: 'sr-idDetails',
+        storeLogoUrl: 'sr-logoUrl',
+        firstName: 'sr-firstName',
+        lastName: 'sr-lastName',
+        email: 'sr-email',
+        phone: 'sr-phone',
+        password: 'sr-password',
+        confirmPassword: 'sr-confirm'
+      });
       return;
     }
 
-    if (form.password !== form.confirmPassword) {
-      setError('Passwords do not match');
-      return;
-    }
+    const emailCheck = validateEmail(form.email, { required: true, applyPolicy: true, policy: EMAIL_POLICY });
+    const phoneCheck = normalizePhMobile(form.phone, { required: true });
 
     try {
       setLoading(true);
       const res = await registerSeller({
-        email: form.email,
+        email: emailCheck.value,
         password: form.password,
-        firstName: form.firstName,
-        lastName: form.lastName,
-        phone: form.phone,
-        storeName: form.storeName,
-        storeDescription: form.storeDescription,
-        storeLogoUrl: form.storeLogoUrl,
-        identificationDetails: form.identificationDetails
+        confirmPassword: form.confirmPassword,
+        firstName: form.firstName.trim(),
+        lastName: form.lastName.trim(),
+        phone: phoneCheck.value,
+        storeName: form.storeName.trim(),
+        storeDescription: form.storeDescription.trim() || '',
+        storeLogoUrl: form.storeLogoUrl.trim() || '',
+        identificationDetails: form.identificationDetails.trim()
       });
 
       if (res.success) {
         setSubmitted(true);
       }
     } catch (err) {
+      if (err?.data?.fieldErrors) setFieldErrors(prev => ({ ...prev, ...err.data.fieldErrors }));
       setError(err.message || 'Registration failed');
     } finally {
       setLoading(false);
@@ -127,7 +221,7 @@ export default function SellerRegisterPage() {
               </div>
 
               {error && (
-                <div style={{
+                <div role="alert" style={{
                   background: '#FEF2F2',
                   border: '1px solid #FCA5A5',
                   color: 'var(--color-error)',
@@ -140,137 +234,221 @@ export default function SellerRegisterPage() {
                 </div>
               )}
 
-              <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+              <form onSubmit={handleSubmit} noValidate style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Store / Merchant Brand Name *</label>
+                  <label htmlFor="sr-storeName" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
+                    Store / Merchant Brand Name *
+                  </label>
                   <input
+                    id="sr-storeName"
                     type="text"
                     required
+                    aria-required="true"
+                    aria-invalid={Boolean(fieldErrors.storeName)}
+                    aria-describedby={fieldErrors.storeName ? 'sr-storeName-err' : undefined}
+                    maxLength={80}
                     placeholder="e.g. Apex Footwear Hub"
                     value={form.storeName}
-                    onChange={e => setForm({ ...form, storeName: e.target.value })}
+                    onChange={e => setField('storeName', e.target.value)}
+                    onBlur={() => handleBlur('storeName')}
                     className="form-input"
                   />
+                  <InlineFieldError id="sr-storeName-err" error={fieldErrors.storeName} />
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Store Overview &amp; Specialty</label>
+                  <label htmlFor="sr-storeDesc" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
+                    Store Overview &amp; Specialty <span className="form-optional">(optional)</span>
+                  </label>
                   <textarea
+                    id="sr-storeDesc"
                     rows="2"
+                    maxLength={1000}
                     placeholder="Authorized distributor of performance and marathon running shoes..."
                     value={form.storeDescription}
-                    onChange={e => setForm({ ...form, storeDescription: e.target.value })}
+                    onChange={e => setField('storeDescription', e.target.value)}
+                    onBlur={() => handleBlur('storeDescription')}
+                    aria-invalid={Boolean(fieldErrors.storeDescription)}
+                    aria-describedby={fieldErrors.storeDescription ? 'sr-storeDesc-err' : undefined}
                     className="form-input"
                   />
+                  <InlineFieldError id="sr-storeDesc-err" error={fieldErrors.storeDescription} />
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Business / DTI / TIN ID Details (FR-5.2) *</label>
+                    <label htmlFor="sr-idDetails" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
+                      Business / DTI / TIN ID Details *
+                    </label>
                     <input
+                      id="sr-idDetails"
                       type="text"
                       required
+                      aria-required="true"
+                      aria-invalid={Boolean(fieldErrors.identificationDetails)}
+                      aria-describedby={fieldErrors.identificationDetails ? 'sr-idDetails-err' : undefined}
+                      maxLength={300}
                       placeholder="e.g. DTI-NCR-2026-884120 / TIN 412-889-102"
                       value={form.identificationDetails}
-                      onChange={e => setForm({ ...form, identificationDetails: e.target.value })}
+                      onChange={e => setField('identificationDetails', e.target.value)}
+                      onBlur={() => handleBlur('identificationDetails')}
                       className="form-input"
                     />
+                    <InlineFieldError id="sr-idDetails-err" error={fieldErrors.identificationDetails} />
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Store Logo URL (Optional)</label>
+                    <label htmlFor="sr-logoUrl" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
+                      Store Logo URL <span className="form-optional">(optional)</span>
+                    </label>
                     <input
+                      id="sr-logoUrl"
                       type="text"
+                      maxLength={300}
                       placeholder="/assets/logo/stridera-logo.png"
                       value={form.storeLogoUrl}
-                      onChange={e => setForm({ ...form, storeLogoUrl: e.target.value })}
+                      onChange={e => setField('storeLogoUrl', e.target.value)}
+                      onBlur={() => handleBlur('storeLogoUrl')}
+                      aria-invalid={Boolean(fieldErrors.storeLogoUrl)}
+                      aria-describedby={fieldErrors.storeLogoUrl ? 'sr-logoUrl-err' : undefined}
                       className="form-input"
                     />
+                    <InlineFieldError id="sr-logoUrl-err" error={fieldErrors.storeLogoUrl} />
                   </div>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Representative First Name *</label>
+                    <label htmlFor="sr-firstName" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
+                      Representative First Name *
+                    </label>
                     <input
+                      id="sr-firstName"
                       type="text"
                       required
+                      aria-required="true"
+                      aria-invalid={Boolean(fieldErrors.firstName)}
+                      aria-describedby={fieldErrors.firstName ? 'sr-firstName-err' : undefined}
+                      maxLength={60}
                       placeholder="Juan"
                       value={form.firstName}
-                      onChange={e => setForm({ ...form, firstName: e.target.value })}
+                      onChange={e => setField('firstName', e.target.value)}
+                      onBlur={() => handleBlur('firstName')}
                       className="form-input"
                     />
+                    <InlineFieldError id="sr-firstName-err" error={fieldErrors.firstName} />
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Last Name *</label>
+                    <label htmlFor="sr-lastName" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
+                      Last Name *
+                    </label>
                     <input
+                      id="sr-lastName"
                       type="text"
                       required
+                      aria-required="true"
+                      aria-invalid={Boolean(fieldErrors.lastName)}
+                      aria-describedby={fieldErrors.lastName ? 'sr-lastName-err' : undefined}
+                      maxLength={60}
                       placeholder="Dela Cruz"
                       value={form.lastName}
-                      onChange={e => setForm({ ...form, lastName: e.target.value })}
+                      onChange={e => setField('lastName', e.target.value)}
+                      onBlur={() => handleBlur('lastName')}
                       className="form-input"
                     />
+                    <InlineFieldError id="sr-lastName-err" error={fieldErrors.lastName} />
                   </div>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Business Email *</label>
+                    <label htmlFor="sr-email" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
+                      Business Email *
+                    </label>
                     <input
+                      id="sr-email"
                       type="email"
+                      autoComplete="email"
                       required
-                      placeholder="vendor@company.ph"
+                      aria-required="true"
+                      aria-invalid={Boolean(fieldErrors.email)}
+                      aria-describedby={fieldErrors.email ? 'sr-email-err' : undefined}
+                      maxLength={254}
+                      placeholder="name@gmail.com"
                       value={form.email}
-                      onChange={e => setForm({ ...form, email: e.target.value })}
+                      onChange={e => setField('email', e.target.value)}
+                      onBlur={() => handleBlur('email')}
                       className="form-input"
                     />
+                    <InlineFieldError id="sr-email-err" error={fieldErrors.email} />
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Contact Mobile (+63 9XX-XXX-YYYY) *</label>
+                    <label htmlFor="sr-phone" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
+                      Contact Mobile *
+                    </label>
                     <input
+                      id="sr-phone"
                       type="tel"
-                      inputMode="numeric"
+                      inputMode="tel"
+                      autoComplete="tel"
                       maxLength={16}
-                      pattern="^\+63 9\d{2}-\d{3}-\d{4}$"
                       required
-                      placeholder="+63 917-123-4567"
+                      aria-required="true"
+                      aria-invalid={Boolean(fieldErrors.phone)}
+                      aria-describedby={fieldErrors.phone ? 'sr-phone-err' : 'sr-phone-hint'}
+                      placeholder="+63 9XX-XXX-YYYY"
                       value={form.phone}
-                      onKeyDown={e => {
-                        if ((e.key === 'Backspace' || e.key === 'Delete') && (e.currentTarget.selectionStart ?? 0) <= 4 && (e.currentTarget.selectionEnd ?? 0) <= 4) {
-                          e.preventDefault();
-                        }
-                      }}
-                      onChange={e => setForm({ ...form, phone: formatPhMobile(e.target.value) })}
+                      onKeyDown={handlePhMobileKeyDown}
+                      onChange={e => setField('phone', formatPhMobileInput(e.target.value))}
+                      onBlur={() => handleBlur('phone')}
                       className="form-input"
                     />
-                    <span style={{ fontSize: '11px', color: form.phone.length > 4 && !PH_MOBILE_REGEX.test(form.phone) ? 'var(--color-error)' : 'var(--color-text-muted)' }}>
-                      {form.phone.replace(/\D/g, '').length}/12 digits (Format: +63 9XX-XXX-YYYY)
+                    <InlineFieldError id="sr-phone-err" error={fieldErrors.phone} />
+                    <span id="sr-phone-hint" style={{ fontSize: '11px', color: 'var(--color-text-muted)', display: 'block', marginTop: 3 }}>
+                      {form.phone.replace(/\D/g, '').length}/12 digits (+63 9XX-XXX-YYYY)
                     </span>
                   </div>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Password (min 8 chars) *</label>
-                    <input
-                      type="password"
+                    <label htmlFor="sr-password" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
+                      Password *
+                    </label>
+                    <PasswordInput
+                      id="sr-password"
+                      autoComplete="new-password"
                       required
-                      minLength="8"
+                      aria-required="true"
+                      aria-invalid={Boolean(fieldErrors.password)}
+                      aria-describedby={fieldErrors.password ? 'sr-password-err' : undefined}
+                      minLength={8}
+                      placeholder="Min 8 chars, 1 letter & 1 number"
                       value={form.password}
-                      onChange={e => setForm({ ...form, password: e.target.value })}
+                      onChange={e => setField('password', e.target.value)}
+                      onBlur={() => handleBlur('password')}
                       className="form-input"
                     />
+                    <InlineFieldError id="sr-password-err" error={fieldErrors.password} />
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Confirm Password *</label>
-                    <input
-                      type="password"
+                    <label htmlFor="sr-confirm" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
+                      Confirm Password *
+                    </label>
+                    <PasswordInput
+                      id="sr-confirm"
+                      toggleLabel="confirm password"
+                      autoComplete="new-password"
                       required
-                      minLength="8"
+                      aria-required="true"
+                      aria-invalid={Boolean(fieldErrors.confirmPassword)}
+                      aria-describedby={fieldErrors.confirmPassword ? 'sr-confirm-err' : undefined}
+                      minLength={8}
                       value={form.confirmPassword}
-                      onChange={e => setForm({ ...form, confirmPassword: e.target.value })}
+                      onChange={e => setField('confirmPassword', e.target.value)}
+                      onBlur={() => handleBlur('confirmPassword')}
                       className="form-input"
                     />
+                    <InlineFieldError id="sr-confirm-err" error={fieldErrors.confirmPassword} />
                   </div>
                 </div>
 

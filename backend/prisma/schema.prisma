@@ -203,11 +203,18 @@ model Address {
   label        String?
   fullName     String   @map("full_name")
   phone        String
-  addressLine1 String   @map("address_line1")
-  addressLine2 String?  @map("address_line2")
-  city         String
-  province     String
-  postalCode   String   @map("postal_code")
+  addressLine1  String   @map("address_line1")
+  addressLine2  String?  @map("address_line2")
+  barangay      String?
+  city          String
+  province      String
+  region        String?
+  regionCode    String?  @map("region_code")
+  provinceCode  String?  @map("province_code")
+  cityCode      String?  @map("city_code")
+  barangayCode  String?  @map("barangay_code")
+  addressSource String   @default("MANUAL") @map("address_source")
+  postalCode    String   @map("postal_code")
   country      String   @default("PH")
   isDefault    Boolean  @default(false) @map("is_default")
   createdAt    DateTime @default(now()) @map("created_at")
@@ -393,8 +400,15 @@ model Order {
   shippingPhone         String?        @map("shipping_phone")
   shippingAddressLine1  String?        @map("shipping_address_line1")
   shippingAddressLine2  String?        @map("shipping_address_line2")
+  shippingBarangay      String?        @map("shipping_barangay")
   shippingCity          String?        @map("shipping_city")
   shippingProvince      String?        @map("shipping_province")
+  shippingRegion        String?        @map("shipping_region")
+  shippingRegionCode    String?        @map("shipping_region_code")
+  shippingProvinceCode  String?        @map("shipping_province_code")
+  shippingCityCode      String?        @map("shipping_city_code")
+  shippingBarangayCode  String?        @map("shipping_barangay_code")
+  shippingAddressSource String         @default("MANUAL") @map("shipping_address_source")
   shippingPostalCode    String?        @map("shipping_postal_code")
   shippingCountry       String?        @map("shipping_country")
   promotionId           String?        @map("promotion_id") @db.Uuid
@@ -446,7 +460,7 @@ model OrderItem {
 model Payment {
   id                  String                @id @default(uuid()) @db.Uuid
   orderId             String                @map("order_id") @db.Uuid
-  provider            String                @default("paymongo")
+  provider            String                @default("ewallet_sandbox")
   paymentMethod       String?               @default("gcash") @map("payment_method")
   providerPaymentId   String?               @map("provider_payment_id")
   providerCheckoutUrl String?               @map("provider_checkout_url")

@@ -13,20 +13,45 @@ import {
   postSupportMessage,
   logout
 } from '../../../lib/api';
+import PhilippineAddressPicker from '../../../components/PhilippineAddressPicker';
+import InlineFieldError from '../../../components/InlineFieldError';
+import PasswordInput from '../../../components/PasswordInput';
+import {
+  formatPhMobileInput,
+  handlePhMobileKeyDown,
+  isEmptyPhPrefix,
+  normalizePhMobile,
+  validatePersonName,
+  validatePassword,
+  validateStreet,
+  validateCityOrProvince,
+  validatePostalCode,
+  validateOptionalText,
+  focusFirstInvalidField
+} from '../../../lib/validation';
 
 export default function AccountProfilePage() {
   const router = useRouter();
   const [user, setUser] = useState(null);
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [savingAction, setSavingAction] = useState('');
   const [msg, setMsg] = useState(null);
 
-  const [profileForm, setProfileForm] = useState({ firstName: '', lastName: '', phone: '' });
-  const [pwdForm, setPwdForm] = useState({ currentPassword: '', newPassword: '' });
+  const [profileForm, setProfileForm] = useState({ firstName: '', lastName: '', phone: '+63 ' });
+  const [profileErrors, setProfileErrors] = useState({});
+
+  const [pwdForm, setPwdForm] = useState({ currentPassword: '', newPassword: '', confirmNewPassword: '' });
+  const [pwdErrors, setPwdErrors] = useState({});
+
   const [addrForm, setAddrForm] = useState({
-    label: 'Home', fullName: '', phone: '', addressLine1: '', addressLine2: '',
-    city: '', province: '', postalCode: '', isDefault: true
+    label: 'Home', fullName: '', phone: '+63 ', addressLine1: '', addressLine2: '',
+    region: '', barangay: '', city: '', province: '',
+    regionCode: '', provinceCode: '', cityCode: '', barangayCode: '', addressSource: 'MANUAL',
+    postalCode: '', isDefault: true
   });
+  const [addrErrors, setAddrErrors] = useState({});
+
   const [replyText, setReplyText] = useState({});
 
   const loadData = async () => {
@@ -38,15 +63,16 @@ export default function AccountProfilePage() {
       ]);
       if (meRes.data) {
         setUser(meRes.data);
+        const normalizedPhone = meRes.data.phone ? formatPhMobileInput(meRes.data.phone) : '+63 ';
         setProfileForm({
           firstName: meRes.data.firstName || '',
           lastName: meRes.data.lastName || '',
-          phone: meRes.data.phone || ''
+          phone: normalizedPhone
         });
         setAddrForm(prev => ({
           ...prev,
-          fullName: `${meRes.data.firstName} ${meRes.data.lastName}`,
-          phone: meRes.data.phone || ''
+          fullName: `${meRes.data.firstName} ${meRes.data.lastName}`.trim(),
+          phone: normalizedPhone
         }));
       }
       setTickets(tktRes.data || []);
@@ -63,40 +89,202 @@ export default function AccountProfilePage() {
 
   const flash = (type, text) => {
     setMsg({ type, text });
-    setTimeout(() => setMsg(null), 3500);
+    setTimeout(() => setMsg(null), 4000);
+  };
+
+  const validateProfileField = (field, raw) => {
+    if (field === 'firstName') {
+      const r = validatePersonName(raw, 'First name');
+      return r.valid ? null : r.error;
+    }
+    if (field === 'lastName') {
+      const r = validatePersonName(raw, 'Last name');
+      return r.valid ? null : r.error;
+    }
+    if (field === 'phone') {
+      const r = normalizePhMobile(raw, { required: false });
+      return r.valid ? null : r.error;
+    }
+    return null;
   };
 
   const handleSaveProfile = async (e) => {
     e.preventDefault();
+    if (savingAction) return;
+
+    const errors = {
+      firstName: validateProfileField('firstName', profileForm.firstName),
+      lastName: validateProfileField('lastName', profileForm.lastName),
+      phone: validateProfileField('phone', profileForm.phone)
+    };
+    setProfileErrors(errors);
+    if (Object.values(errors).some(Boolean)) {
+      focusFirstInvalidField(errors, { firstName: 'prof-firstName', lastName: 'prof-lastName', phone: 'prof-phone' });
+      return;
+    }
+
+    const phoneToSend = isEmptyPhPrefix(profileForm.phone) ? '' : normalizePhMobile(profileForm.phone, { required: false }).value;
+    setSavingAction('profile');
     try {
-      const res = await updateProfile(profileForm);
+      const res = await updateProfile({
+        firstName: profileForm.firstName.trim(),
+        lastName: profileForm.lastName.trim(),
+        phone: phoneToSend
+      });
       setUser(prev => ({ ...prev, ...res.data }));
       flash('success', 'Profile information updated (FR-1.6).');
     } catch (err) {
+      if (err?.data?.fieldErrors) setProfileErrors(prev => ({ ...prev, ...err.data.fieldErrors }));
       flash('error', err.message);
+    } finally {
+      setSavingAction('');
     }
+  };
+
+  const validatePwdField = (field, raw, next = pwdForm) => {
+    if (field === 'currentPassword') {
+      const r = validatePassword(raw, { required: true, checkStrength: false, label: 'Current password' });
+      return r.valid ? null : r.error;
+    }
+    if (field === 'newPassword') {
+      const r = validatePassword(raw, { required: true, checkStrength: true, label: 'New password' });
+      return r.valid ? null : r.error;
+    }
+    if (field === 'confirmNewPassword') {
+      if (!raw) return 'Please confirm your new password.';
+      return raw === next.newPassword ? null : 'New passwords do not match.';
+    }
+    return null;
   };
 
   const handleChangePassword = async (e) => {
     e.preventDefault();
+    if (savingAction) return;
+
+    const errors = {
+      currentPassword: validatePwdField('currentPassword', pwdForm.currentPassword),
+      newPassword: validatePwdField('newPassword', pwdForm.newPassword),
+      confirmNewPassword: validatePwdField('confirmNewPassword', pwdForm.confirmNewPassword)
+    };
+    setPwdErrors(errors);
+    if (Object.values(errors).some(Boolean)) {
+      focusFirstInvalidField(errors, {
+        currentPassword: 'pwd-current',
+        newPassword: 'pwd-new',
+        confirmNewPassword: 'pwd-confirm'
+      });
+      return;
+    }
+
+    setSavingAction('password');
     try {
       const res = await changePassword(pwdForm.currentPassword, pwdForm.newPassword);
-      setPwdForm({ currentPassword: '', newPassword: '' });
+      setPwdForm({ currentPassword: '', newPassword: '', confirmNewPassword: '' });
+      setPwdErrors({});
       flash('success', res.message);
     } catch (err) {
+      if (err?.data?.fieldErrors) setPwdErrors(prev => ({ ...prev, ...err.data.fieldErrors }));
       flash('error', err.message);
+    } finally {
+      setSavingAction('');
+    }
+  };
+
+  const validateAddrField = (field, raw) => {
+    switch (field) {
+      case 'fullName': {
+        const r = validatePersonName(raw, 'Recipient full name');
+        return r.valid ? null : r.error;
+      }
+      case 'phone': {
+        const r = normalizePhMobile(raw, { required: true });
+        return r.valid ? null : r.error;
+      }
+      case 'addressLine1': {
+        const r = validateStreet(raw);
+        return r.valid ? null : r.error;
+      }
+      case 'addressLine2': {
+        const r = validateOptionalText(raw, 'Address line 2', { max: 200 });
+        return r.valid ? null : r.error;
+      }
+      case 'city': {
+        const r = validateCityOrProvince(raw, 'City');
+        return r.valid ? null : r.error;
+      }
+      case 'province': {
+        const r = validateCityOrProvince(raw, 'Province');
+        return r.valid ? null : r.error;
+      }
+      case 'postalCode': {
+        const r = validatePostalCode(raw);
+        return r.valid ? null : r.error;
+      }
+      case 'label': {
+        const r = validateOptionalText(raw, 'Address label', { max: 50 });
+        return r.valid ? null : r.error;
+      }
+      default:
+        return null;
     }
   };
 
   const handleAddAddress = async (e) => {
     e.preventDefault();
+    if (savingAction) return;
+
+    const errors = {
+      fullName: validateAddrField('fullName', addrForm.fullName),
+      phone: validateAddrField('phone', addrForm.phone),
+      addressLine1: validateAddrField('addressLine1', addrForm.addressLine1),
+      addressLine2: validateAddrField('addressLine2', addrForm.addressLine2),
+      postalCode: validateAddrField('postalCode', addrForm.postalCode),
+      label: validateAddrField('label', addrForm.label),
+      city: validateAddrField('city', addrForm.city),
+      province: validateAddrField('province', addrForm.province)
+    };
+    setAddrErrors(errors);
+    if (Object.values(errors).some(Boolean)) {
+      focusFirstInvalidField(errors, {
+        fullName: 'addr-fullName',
+        phone: 'addr-phone',
+        addressLine1: 'addr-line1',
+        addressLine2: 'addr-line2',
+        postalCode: 'addr-postal',
+        label: 'addr-label',
+        city: 'psgc-city',
+        province: 'psgc-province'
+      });
+      return;
+    }
+
+    const cleanPhone = normalizePhMobile(addrForm.phone, { required: true }).value;
+    setSavingAction('address');
     try {
-      await addAddress(addrForm);
-      setAddrForm(prev => ({ ...prev, addressLine1: '', addressLine2: '', city: '', province: '', postalCode: '' }));
+      await addAddress({
+        ...addrForm,
+        fullName: addrForm.fullName.trim(),
+        phone: cleanPhone,
+        addressLine1: addrForm.addressLine1.trim(),
+        addressLine2: addrForm.addressLine2.trim() || null,
+        label: addrForm.label.trim() || null,
+        postalCode: addrForm.postalCode.trim()
+      });
+      setAddrForm(prev => ({
+        ...prev,
+        addressLine1: '', addressLine2: '',
+        region: '', barangay: '', city: '', province: '',
+        regionCode: '', provinceCode: '', cityCode: '', barangayCode: '', addressSource: 'MANUAL',
+        postalCode: ''
+      }));
+      setAddrErrors({});
       await loadData();
       flash('success', 'Delivery address saved.');
     } catch (err) {
+      if (err?.data?.fieldErrors) setAddrErrors(prev => ({ ...prev, ...err.data.fieldErrors }));
       flash('error', err.message);
+    } finally {
+      setSavingAction('');
     }
   };
 
@@ -112,9 +300,12 @@ export default function AccountProfilePage() {
 
   const handleSendReply = async (ticketId) => {
     const text = replyText[ticketId];
-    if (!text?.trim()) return;
+    if (!text?.trim()) {
+      flash('error', 'Reply message cannot be empty.');
+      return;
+    }
     try {
-      await postSupportMessage(ticketId, text);
+      await postSupportMessage(ticketId, text.trim());
       setReplyText(prev => ({ ...prev, [ticketId]: '' }));
       await loadData();
       flash('success', 'Reply sent to Customer Support.');
@@ -174,35 +365,123 @@ export default function AccountProfilePage() {
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-6)', marginBottom: 'var(--space-8)' }}>
           {/* Personal Info (FR-1.6) */}
-          <form onSubmit={handleSaveProfile} style={{ background: 'var(--color-surface)', padding: 'var(--space-6)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border)' }}>
+          <form onSubmit={handleSaveProfile} noValidate style={{ background: 'var(--color-surface)', padding: 'var(--space-6)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border)' }}>
             <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, marginBottom: 'var(--space-4)' }}>Personal Details</h2>
             <div className="form-group">
-              <label className="form-label">First Name</label>
-              <input className="form-input" value={profileForm.firstName} onChange={e => setProfileForm(p => ({ ...p, firstName: e.target.value }))} required />
+              <label className="form-label" htmlFor="prof-firstName">First Name *</label>
+              <input
+                id="prof-firstName"
+                className="form-input"
+                value={profileForm.firstName}
+                onChange={e => setProfileForm(p => ({ ...p, firstName: e.target.value }))}
+                onBlur={() => setProfileErrors(p => ({ ...p, firstName: validateProfileField('firstName', profileForm.firstName) }))}
+                required
+                aria-required="true"
+                aria-invalid={Boolean(profileErrors.firstName)}
+                aria-describedby={profileErrors.firstName ? 'prof-firstName-err' : undefined}
+                maxLength={60}
+              />
+              <InlineFieldError id="prof-firstName-err" error={profileErrors.firstName} />
             </div>
             <div className="form-group">
-              <label className="form-label">Last Name</label>
-              <input className="form-input" value={profileForm.lastName} onChange={e => setProfileForm(p => ({ ...p, lastName: e.target.value }))} required />
+              <label className="form-label" htmlFor="prof-lastName">Last Name *</label>
+              <input
+                id="prof-lastName"
+                className="form-input"
+                value={profileForm.lastName}
+                onChange={e => setProfileForm(p => ({ ...p, lastName: e.target.value }))}
+                onBlur={() => setProfileErrors(p => ({ ...p, lastName: validateProfileField('lastName', profileForm.lastName) }))}
+                required
+                aria-required="true"
+                aria-invalid={Boolean(profileErrors.lastName)}
+                aria-describedby={profileErrors.lastName ? 'prof-lastName-err' : undefined}
+                maxLength={60}
+              />
+              <InlineFieldError id="prof-lastName-err" error={profileErrors.lastName} />
             </div>
             <div className="form-group">
-              <label className="form-label">Phone Number</label>
-              <input className="form-input" value={profileForm.phone} onChange={e => setProfileForm(p => ({ ...p, phone: e.target.value }))} />
+              <label className="form-label" htmlFor="prof-phone">Mobile Number <span className="form-optional">(optional)</span></label>
+              <input
+                id="prof-phone"
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                maxLength={16}
+                placeholder="+63 9XX-XXX-YYYY"
+                className="form-input"
+                value={profileForm.phone}
+                onKeyDown={handlePhMobileKeyDown}
+                onChange={e => setProfileForm(p => ({ ...p, phone: formatPhMobileInput(e.target.value) }))}
+                onBlur={() => setProfileErrors(p => ({ ...p, phone: validateProfileField('phone', profileForm.phone) }))}
+                aria-invalid={Boolean(profileErrors.phone)}
+                aria-describedby={profileErrors.phone ? 'prof-phone-err' : undefined}
+              />
+              <InlineFieldError id="prof-phone-err" error={profileErrors.phone} />
             </div>
-            <button type="submit" className="btn btn-primary">Save Profile</button>
+            <button type="submit" className="btn btn-primary" disabled={savingAction === 'profile'}>
+              {savingAction === 'profile' ? 'Saving…' : 'Save Profile'}
+            </button>
           </form>
 
           {/* Change Password (FR-1.7) */}
-          <form onSubmit={handleChangePassword} style={{ background: 'var(--color-surface)', padding: 'var(--space-6)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border)' }}>
+          <form onSubmit={handleChangePassword} noValidate style={{ background: 'var(--color-surface)', padding: 'var(--space-6)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border)' }}>
             <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, marginBottom: 'var(--space-4)' }}>Change Password (FR-1.7)</h2>
             <div className="form-group">
-              <label className="form-label">Current Password</label>
-              <input type="password" className="form-input" value={pwdForm.currentPassword} onChange={e => setPwdForm(p => ({ ...p, currentPassword: e.target.value }))} required />
+              <label className="form-label" htmlFor="pwd-current">Current Password *</label>
+              <PasswordInput
+                id="pwd-current"
+                toggleLabel="current password"
+                autoComplete="current-password"
+                className="form-input"
+                value={pwdForm.currentPassword}
+                onChange={e => setPwdForm(p => ({ ...p, currentPassword: e.target.value }))}
+                onBlur={() => setPwdErrors(p => ({ ...p, currentPassword: validatePwdField('currentPassword', pwdForm.currentPassword) }))}
+                required
+                aria-required="true"
+                aria-invalid={Boolean(pwdErrors.currentPassword)}
+                aria-describedby={pwdErrors.currentPassword ? 'pwd-current-err' : undefined}
+              />
+              <InlineFieldError id="pwd-current-err" error={pwdErrors.currentPassword} />
             </div>
             <div className="form-group">
-              <label className="form-label">New Password (min 8 characters)</label>
-              <input type="password" className="form-input" minLength={8} value={pwdForm.newPassword} onChange={e => setPwdForm(p => ({ ...p, newPassword: e.target.value }))} required />
+              <label className="form-label" htmlFor="pwd-new">New Password *</label>
+              <PasswordInput
+                id="pwd-new"
+                toggleLabel="new password"
+                autoComplete="new-password"
+                className="form-input"
+                minLength={8}
+                placeholder="Min 8 chars, 1 letter & 1 number"
+                value={pwdForm.newPassword}
+                onChange={e => setPwdForm(p => ({ ...p, newPassword: e.target.value }))}
+                onBlur={() => setPwdErrors(p => ({ ...p, newPassword: validatePwdField('newPassword', pwdForm.newPassword) }))}
+                required
+                aria-required="true"
+                aria-invalid={Boolean(pwdErrors.newPassword)}
+                aria-describedby={pwdErrors.newPassword ? 'pwd-new-err' : undefined}
+              />
+              <InlineFieldError id="pwd-new-err" error={pwdErrors.newPassword} />
             </div>
-            <button type="submit" className="btn btn-outline">Update Password</button>
+            <div className="form-group">
+              <label className="form-label" htmlFor="pwd-confirm">Confirm New Password *</label>
+              <PasswordInput
+                id="pwd-confirm"
+                toggleLabel="confirm password"
+                autoComplete="new-password"
+                className="form-input"
+                value={pwdForm.confirmNewPassword}
+                onChange={e => setPwdForm(p => ({ ...p, confirmNewPassword: e.target.value }))}
+                onBlur={() => setPwdErrors(p => ({ ...p, confirmNewPassword: validatePwdField('confirmNewPassword', pwdForm.confirmNewPassword) }))}
+                required
+                aria-required="true"
+                aria-invalid={Boolean(pwdErrors.confirmNewPassword)}
+                aria-describedby={pwdErrors.confirmNewPassword ? 'pwd-confirm-err' : undefined}
+              />
+              <InlineFieldError id="pwd-confirm-err" error={pwdErrors.confirmNewPassword} />
+            </div>
+            <button type="submit" className="btn btn-outline" disabled={savingAction === 'password'}>
+              {savingAction === 'password' ? 'Updating…' : 'Update Password'}
+            </button>
           </form>
         </div>
 
@@ -214,9 +493,14 @@ export default function AccountProfilePage() {
               <div key={addr.id} style={{ padding: 'var(--space-4)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)', background: 'var(--color-bg)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div style={{ fontSize: 'var(--text-sm)' }}>
                   <strong>{addr.label || 'Address'} — {addr.fullName}</strong> {addr.isDefault && <span style={{ color: 'var(--color-brand-primary)', fontSize: '11px' }}>(Default)</span>}
+                  {addr.addressSource === 'PSGC_VERIFIED' && (
+                    <span style={{ marginLeft: 6, background: 'rgba(22,163,74,0.12)', color: '#166534', padding: '1px 6px', borderRadius: 99, fontSize: '10px', fontWeight: 700 }}>
+                      ✓ PSGC Verified
+                    </span>
+                  )}
                   <p style={{ color: 'var(--color-text-muted)', marginTop: 4 }}>
                     {addr.addressLine1}{addr.addressLine2 ? `, ${addr.addressLine2}` : ''}<br />
-                    {addr.city}, {addr.province} {addr.postalCode} &bull; {addr.phone}
+                    {addr.barangay ? `Brgy. ${addr.barangay}, ` : ''}{addr.city}, {addr.province}{addr.region ? `, ${addr.region}` : ''} {addr.postalCode} &bull; {addr.phone}
                   </p>
                 </div>
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleDeleteAddress(addr.id)} style={{ color: 'var(--color-error)' }}>
@@ -226,17 +510,117 @@ export default function AccountProfilePage() {
             ))}
           </div>
 
-          <form onSubmit={handleAddAddress}>
+          <form onSubmit={handleAddAddress} noValidate>
             <h3 style={{ fontSize: 'var(--text-sm)', fontWeight: 700, marginBottom: 'var(--space-3)' }}>Add New Address</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 'var(--space-3)' }}>
-              <input className="form-input" placeholder="Recipient Full Name" value={addrForm.fullName} onChange={e => setAddrForm(p => ({ ...p, fullName: e.target.value }))} required />
-              <input className="form-input" placeholder="Phone (+639...)" value={addrForm.phone} onChange={e => setAddrForm(p => ({ ...p, phone: e.target.value }))} required />
-              <input className="form-input" placeholder="Street / Building" value={addrForm.addressLine1} onChange={e => setAddrForm(p => ({ ...p, addressLine1: e.target.value }))} required />
-              <input className="form-input" placeholder="City" value={addrForm.city} onChange={e => setAddrForm(p => ({ ...p, city: e.target.value }))} required />
-              <input className="form-input" placeholder="Province" value={addrForm.province} onChange={e => setAddrForm(p => ({ ...p, province: e.target.value }))} required />
-              <input className="form-input" placeholder="Postal Code" value={addrForm.postalCode} onChange={e => setAddrForm(p => ({ ...p, postalCode: e.target.value }))} required />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
+              <div>
+                <label className="form-label" htmlFor="addr-fullName">Recipient Full Name *</label>
+                <input
+                  id="addr-fullName"
+                  className="form-input"
+                  placeholder="Recipient Full Name"
+                  value={addrForm.fullName}
+                  onChange={e => setAddrForm(p => ({ ...p, fullName: e.target.value }))}
+                  onBlur={() => setAddrErrors(p => ({ ...p, fullName: validateAddrField('fullName', addrForm.fullName) }))}
+                  required
+                  aria-required="true"
+                  aria-invalid={Boolean(addrErrors.fullName)}
+                  aria-describedby={addrErrors.fullName ? 'addr-fullName-err' : undefined}
+                />
+                <InlineFieldError id="addr-fullName-err" error={addrErrors.fullName} />
+              </div>
+              <div>
+                <label className="form-label" htmlFor="addr-phone">Mobile Number *</label>
+                <input
+                  id="addr-phone"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  maxLength={16}
+                  className="form-input"
+                  placeholder="+63 9XX-XXX-YYYY"
+                  value={addrForm.phone}
+                  onKeyDown={handlePhMobileKeyDown}
+                  onChange={e => setAddrForm(p => ({ ...p, phone: formatPhMobileInput(e.target.value) }))}
+                  onBlur={() => setAddrErrors(p => ({ ...p, phone: validateAddrField('phone', addrForm.phone) }))}
+                  required
+                  aria-required="true"
+                  aria-invalid={Boolean(addrErrors.phone)}
+                  aria-describedby={addrErrors.phone ? 'addr-phone-err' : undefined}
+                />
+                <InlineFieldError id="addr-phone-err" error={addrErrors.phone} />
+              </div>
+              <div>
+                <label className="form-label" htmlFor="addr-line1">Street / Building *</label>
+                <input
+                  id="addr-line1"
+                  className="form-input"
+                  placeholder="Street, building, house/unit no."
+                  value={addrForm.addressLine1}
+                  onChange={e => setAddrForm(p => ({ ...p, addressLine1: e.target.value }))}
+                  onBlur={() => setAddrErrors(p => ({ ...p, addressLine1: validateAddrField('addressLine1', addrForm.addressLine1) }))}
+                  required
+                  aria-required="true"
+                  aria-invalid={Boolean(addrErrors.addressLine1)}
+                  aria-describedby={addrErrors.addressLine1 ? 'addr-line1-err' : undefined}
+                />
+                <InlineFieldError id="addr-line1-err" error={addrErrors.addressLine1} />
+              </div>
+              <div>
+                <label className="form-label" htmlFor="addr-line2">Address Line 2 <span className="form-optional">(optional)</span></label>
+                <input
+                  id="addr-line2"
+                  className="form-input"
+                  placeholder="Landmark, floor, unit"
+                  value={addrForm.addressLine2}
+                  onChange={e => setAddrForm(p => ({ ...p, addressLine2: e.target.value }))}
+                  onBlur={() => setAddrErrors(p => ({ ...p, addressLine2: validateAddrField('addressLine2', addrForm.addressLine2) }))}
+                  aria-invalid={Boolean(addrErrors.addressLine2)}
+                  aria-describedby={addrErrors.addressLine2 ? 'addr-line2-err' : undefined}
+                />
+                <InlineFieldError id="addr-line2-err" error={addrErrors.addressLine2} />
+              </div>
+              <div>
+                <label className="form-label" htmlFor="addr-postal">Postal Code *</label>
+                <input
+                  id="addr-postal"
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={4}
+                  className="form-input"
+                  placeholder="4 digits (e.g. 1226)"
+                  value={addrForm.postalCode}
+                  onChange={e => setAddrForm(p => ({ ...p, postalCode: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
+                  onBlur={() => setAddrErrors(p => ({ ...p, postalCode: validateAddrField('postalCode', addrForm.postalCode) }))}
+                  required
+                  aria-required="true"
+                  aria-invalid={Boolean(addrErrors.postalCode)}
+                  aria-describedby={addrErrors.postalCode ? 'addr-postal-err' : undefined}
+                />
+                <InlineFieldError id="addr-postal-err" error={addrErrors.postalCode} />
+              </div>
+              <div>
+                <label className="form-label" htmlFor="addr-label">Label <span className="form-optional">(optional)</span></label>
+                <input
+                  id="addr-label"
+                  className="form-input"
+                  placeholder="e.g. Home, Office"
+                  value={addrForm.label}
+                  onChange={e => setAddrForm(p => ({ ...p, label: e.target.value }))}
+                  onBlur={() => setAddrErrors(p => ({ ...p, label: validateAddrField('label', addrForm.label) }))}
+                  aria-invalid={Boolean(addrErrors.label)}
+                  aria-describedby={addrErrors.label ? 'addr-label-err' : undefined}
+                />
+                <InlineFieldError id="addr-label-err" error={addrErrors.label} />
+              </div>
             </div>
-            <button type="submit" className="btn btn-primary btn-sm" style={{ marginTop: 'var(--space-3)' }}>+ Save Address</button>
+            <PhilippineAddressPicker compact value={addrForm} onChange={setAddrForm} />
+            {(addrErrors.city || addrErrors.province) && (
+              <InlineFieldError id="addr-psgc-err" error={addrErrors.city || addrErrors.province} />
+            )}
+            <button type="submit" className="btn btn-primary btn-sm" style={{ marginTop: 'var(--space-2)' }} disabled={savingAction === 'address'}>
+              {savingAction === 'address' ? 'Saving…' : '+ Save Address'}
+            </button>
           </form>
         </div>
 
@@ -292,4 +676,3 @@ export default function AccountProfilePage() {
     </div>
   );
 }
-

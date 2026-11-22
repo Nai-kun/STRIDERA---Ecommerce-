@@ -3,6 +3,16 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { getSellerDashboard, getSellerProfile, updateSellerProfile, getSellerMetrics, getMe, logout } from '../../../lib/api';
+import InlineFieldError from '../../../components/InlineFieldError';
+import {
+  formatPhMobileInput,
+  handlePhMobileKeyDown,
+  isEmptyPhPrefix,
+  normalizePhMobile,
+  validateEntityName,
+  validateOptionalText,
+  focusFirstInvalidField
+} from '../../../lib/validation';
 
 export default function SellerDashboardPage() {
   const [profile, setProfile] = useState(null);
@@ -18,8 +28,10 @@ export default function SellerDashboardPage() {
     storeDescription: '',
     storeLogoUrl: '',
     identificationDetails: '',
-    phone: ''
+    phone: '+63 '
   });
+  const [profileErrors, setProfileErrors] = useState({});
+  const [savingProfile, setSavingProfile] = useState(false);
   const [msg, setMsg] = useState(null);
 
   const fetchDashboard = async (selectedPeriod = period) => {
@@ -38,7 +50,7 @@ export default function SellerDashboardPage() {
           storeDescription: profileRes.data.storeDescription || '',
           storeLogoUrl: profileRes.data.storeLogoUrl || '',
           identificationDetails: profileRes.data.identificationDetails || '',
-          phone: profileRes.data.phone || ''
+          phone: profileRes.data.phone ? formatPhMobileInput(profileRes.data.phone) : '+63 '
         });
       }
       if (dashboardRes.success) setMetrics(dashboardRes.data);
@@ -65,14 +77,49 @@ export default function SellerDashboardPage() {
 
   const handleSaveStoreProfile = async (e) => {
     e.preventDefault();
+    if (savingProfile) return;
+    const checks = {
+      storeName: validateEntityName(profileForm.storeName, 'Store name', { min: 2, max: 80 }),
+      storeDescription: validateOptionalText(profileForm.storeDescription, 'Store description', { max: 1000 }),
+      identificationDetails: validateOptionalText(profileForm.identificationDetails, 'Identification details', { max: 300 }),
+      phone: normalizePhMobile(profileForm.phone, { required: false })
+    };
+    const errors = {
+      storeName: checks.storeName.valid ? null : checks.storeName.error,
+      storeDescription: checks.storeDescription.valid ? null : checks.storeDescription.error,
+      identificationDetails: checks.identificationDetails.valid ? null : checks.identificationDetails.error,
+      phone: checks.phone.valid ? null : checks.phone.error
+    };
+    setProfileErrors(errors);
+    if (Object.values(errors).some(Boolean)) {
+      focusFirstInvalidField(errors, {
+        storeName: 'sp-storeName',
+        storeDescription: 'sp-storeDesc',
+        identificationDetails: 'sp-idDetails',
+        phone: 'sp-phone'
+      });
+      return;
+    }
+
+    setSavingProfile(true);
     try {
-      const res = await updateSellerProfile(profileForm);
+      const res = await updateSellerProfile({
+        ...profileForm,
+        storeName: checks.storeName.value,
+        storeDescription: checks.storeDescription.value || '',
+        identificationDetails: checks.identificationDetails.value || '',
+        phone: isEmptyPhPrefix(profileForm.phone) ? '' : (checks.phone.value || '')
+      });
       setProfile(prev => ({ ...prev, ...res.data }));
       setEditModal(false);
+      setProfileErrors({});
       setMsg('Store profile & identification details updated (FR-5.2)!');
       setTimeout(() => setMsg(null), 3000);
     } catch (err) {
+      if (err?.data?.fieldErrors) setProfileErrors(prev => ({ ...prev, ...err.data.fieldErrors }));
       setMsg(err.message);
+    } finally {
+      setSavingProfile(false);
     }
   };
 
@@ -592,26 +639,72 @@ export default function SellerDashboardPage() {
             padding: 'var(--space-6)', maxWidth: 480, width: '100%'
           }}>
             <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 800, marginBottom: 'var(--space-4)' }}>Edit Store Profile (FR-5.2)</h2>
-            <form onSubmit={handleSaveStoreProfile}>
+            <form onSubmit={handleSaveStoreProfile} noValidate>
               <div className="form-group">
-                <label className="form-label">Store Name *</label>
-                <input className="form-input" value={profileForm.storeName} onChange={e => setProfileForm(p => ({ ...p, storeName: e.target.value }))} required />
+                <label className="form-label" htmlFor="sp-storeName">Store Name *</label>
+                <input
+                  id="sp-storeName"
+                  className="form-input"
+                  value={profileForm.storeName}
+                  onChange={e => setProfileForm(p => ({ ...p, storeName: e.target.value }))}
+                  required
+                  aria-required="true"
+                  aria-invalid={Boolean(profileErrors.storeName)}
+                  aria-describedby={profileErrors.storeName ? 'sp-storeName-err' : undefined}
+                  maxLength={80}
+                />
+                <InlineFieldError id="sp-storeName-err" error={profileErrors.storeName} />
               </div>
               <div className="form-group">
-                <label className="form-label">Store Description</label>
-                <textarea className="form-input" rows={3} value={profileForm.storeDescription} onChange={e => setProfileForm(p => ({ ...p, storeDescription: e.target.value }))} />
+                <label className="form-label" htmlFor="sp-storeDesc">Store Description <span className="form-optional">(optional)</span></label>
+                <textarea
+                  id="sp-storeDesc"
+                  className="form-input"
+                  rows={3}
+                  value={profileForm.storeDescription}
+                  onChange={e => setProfileForm(p => ({ ...p, storeDescription: e.target.value }))}
+                  aria-invalid={Boolean(profileErrors.storeDescription)}
+                  aria-describedby={profileErrors.storeDescription ? 'sp-storeDesc-err' : undefined}
+                  maxLength={1000}
+                />
+                <InlineFieldError id="sp-storeDesc-err" error={profileErrors.storeDescription} />
               </div>
               <div className="form-group">
-                <label className="form-label">Business / DTI / TIN Identification Details</label>
-                <input className="form-input" value={profileForm.identificationDetails} onChange={e => setProfileForm(p => ({ ...p, identificationDetails: e.target.value }))} />
+                <label className="form-label" htmlFor="sp-idDetails">Business / DTI / TIN Identification Details <span className="form-optional">(optional)</span></label>
+                <input
+                  id="sp-idDetails"
+                  className="form-input"
+                  value={profileForm.identificationDetails}
+                  onChange={e => setProfileForm(p => ({ ...p, identificationDetails: e.target.value }))}
+                  aria-invalid={Boolean(profileErrors.identificationDetails)}
+                  aria-describedby={profileErrors.identificationDetails ? 'sp-idDetails-err' : undefined}
+                  maxLength={300}
+                />
+                <InlineFieldError id="sp-idDetails-err" error={profileErrors.identificationDetails} />
               </div>
               <div className="form-group">
-                <label className="form-label">Contact Phone</label>
-                <input className="form-input" value={profileForm.phone} onChange={e => setProfileForm(p => ({ ...p, phone: e.target.value }))} />
+                <label className="form-label" htmlFor="sp-phone">Contact Mobile <span className="form-optional">(optional)</span></label>
+                <input
+                  id="sp-phone"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  maxLength={16}
+                  placeholder="+63 9XX-XXX-YYYY"
+                  className="form-input"
+                  value={profileForm.phone}
+                  onKeyDown={handlePhMobileKeyDown}
+                  onChange={e => setProfileForm(p => ({ ...p, phone: formatPhMobileInput(e.target.value) }))}
+                  aria-invalid={Boolean(profileErrors.phone)}
+                  aria-describedby={profileErrors.phone ? 'sp-phone-err' : undefined}
+                />
+                <InlineFieldError id="sp-phone-err" error={profileErrors.phone} />
               </div>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                <button type="button" className="btn btn-ghost" onClick={() => setEditModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Save Store Profile</button>
+                <button type="button" className="btn btn-ghost" onClick={() => { setEditModal(false); setProfileErrors({}); }}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={savingProfile}>
+                  {savingProfile ? 'Saving…' : 'Save Store Profile'}
+                </button>
               </div>
             </form>
           </div>

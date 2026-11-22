@@ -10,6 +10,8 @@ import {
   executeSupportTicketAction,
   logout
 } from '../../lib/api';
+import InlineFieldError from '../../components/InlineFieldError';
+import { validateRequiredText } from '../../lib/validation';
 
 export default function CustomerSupportPortalPage() {
   const [activeTab, setActiveTab] = useState('tickets');
@@ -18,6 +20,8 @@ export default function CustomerSupportPortalPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [selectedTicket, setSelectedTicket] = useState(null);
   const [replyText, setReplyText] = useState('');
+  const [replyError, setReplyError] = useState(null);
+  const [sendingReply, setSendingReply] = useState(false);
   const [lookupQuery, setLookupQuery] = useState('');
   const [lookupResults, setLookupResults] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -57,9 +61,18 @@ export default function CustomerSupportPortalPage() {
 
   const handleReply = async (e) => {
     e.preventDefault();
-    if (!selectedTicket || !replyText.trim()) return;
+    if (!selectedTicket || sendingReply) return;
+
+    const replyCheck = validateRequiredText(replyText, 'Support response', { min: 1, max: 2000 });
+    if (!replyCheck.valid) {
+      setReplyError(replyCheck.error);
+      document.getElementById('sup-reply-input')?.focus();
+      return;
+    }
+    setReplyError(null);
+    setSendingReply(true);
     try {
-      const res = await replySupportTicket(selectedTicket.id, replyText);
+      const res = await replySupportTicket(selectedTicket.id, replyCheck.value);
       if (res.success) {
         notify('Reply sent to customer!');
         setReplyText('');
@@ -67,6 +80,8 @@ export default function CustomerSupportPortalPage() {
       }
     } catch (err) {
       notify(err.message || 'Failed to send reply', true);
+    } finally {
+      setSendingReply(false);
     }
   };
 
@@ -347,16 +362,31 @@ export default function CustomerSupportPortalPage() {
                 </div>
 
                 {/* Reply Form */}
-                <form onSubmit={handleReply} style={{ display: 'flex', gap: 'var(--space-2)' }}>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Type support response to customer..."
-                    value={replyText}
-                    onChange={e => setReplyText(e.target.value)}
-                    style={{ flex: 1, padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
-                  />
-                  <button type="submit" className="btn btn-primary">Send Reply</button>
+                <form onSubmit={handleReply} noValidate>
+                  <label htmlFor="sup-reply-input" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: '4px' }}>
+                    Reply to Customer *
+                  </label>
+                  <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                    <input
+                      id="sup-reply-input"
+                      type="text"
+                      required
+                      aria-required="true"
+                      maxLength={2000}
+                      aria-invalid={Boolean(replyError)}
+                      aria-describedby={replyError ? 'sup-reply-error' : undefined}
+                      placeholder="Type support response to customer..."
+                      value={replyText}
+                      onChange={e => {
+                        setReplyText(e.target.value);
+                        if (replyError) setReplyError(null);
+                      }}
+                      onBlur={e => setReplyError(validateRequiredText(e.target.value, 'Support response', { min: 1, max: 2000 }).error)}
+                      style={{ flex: 1, padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: `1px solid ${replyError ? 'var(--color-error)' : 'var(--color-border)'}` }}
+                    />
+                    <button type="submit" disabled={sendingReply} className="btn btn-primary">{sendingReply ? 'Sending…' : 'Send Reply'}</button>
+                  </div>
+                  <InlineFieldError id="sup-reply-error" error={replyError} />
                 </form>
               </div>
             )}

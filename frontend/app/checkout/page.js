@@ -10,6 +10,21 @@ import {
   failSandboxPayment,
   simulatePayment
 } from '../../lib/api';
+import PhilippineAddressPicker from '../../components/PhilippineAddressPicker';
+import InlineFieldError from '../../components/InlineFieldError';
+import {
+  EMAIL_POLICY,
+  formatPhMobileInput,
+  handlePhMobileKeyDown,
+  normalizePhMobile,
+  validateEmail,
+  validatePersonName,
+  validateStreet,
+  validateCityOrProvince,
+  validatePostalCode,
+  validateOptionalText,
+  focusFirstInvalidField
+} from '../../lib/validation';
 
 const STEPS = ['Customer Info', 'Shipping', 'Payment Method', 'E-Wallet Payment'];
 
@@ -27,66 +42,121 @@ export default function CheckoutPage() {
   const [paymentSession, setPaymentSession] = useState(null);
   const [paymentCompleted, setPaymentCompleted] = useState(false);
   const [paymentFailedMsg, setPaymentFailedMsg] = useState(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   const [form, setForm] = useState({
     firstName: '', lastName: '', email: '', phone: '+63 ',
-    addressLine1: '', addressLine2: '', city: '', province: '', postalCode: '',
+    addressLine1: '', addressLine2: '',
+    region: '', barangay: '', city: '', province: '', postalCode: '',
+    regionCode: '', provinceCode: '', cityCode: '', barangayCode: '', addressSource: 'MANUAL',
     notes: '', promotionCode: '', paymentMethod: 'gcash'
   });
+  const [fieldErrors, setFieldErrors] = useState({});
 
-  const PH_MOBILE_REGEX = /^\+63 9\d{2}-\d{3}-\d{4}$/;
+  const validateStep0Field = (key, val) => {
+    switch (key) {
+      case 'firstName':
+        return validatePersonName(val, 'First name').error;
+      case 'lastName':
+        return validatePersonName(val, 'Last name').error;
+      case 'email':
+        return validateEmail(val, { required: true, applyPolicy: !isLoggedIn, policy: EMAIL_POLICY }).error;
+      case 'phone':
+        return normalizePhMobile(val, { required: true }).error;
+      default:
+        return null;
+    }
+  };
 
-  const formatPhMobile = (raw) => {
-    let digits = raw.replace(/\D/g, '');
-    if (digits.startsWith('63')) digits = digits.slice(2);
-    else if (digits.startsWith('0')) digits = digits.slice(1);
-    digits = digits.slice(0, 10);
-    let formatted = digits.slice(0, 3);
-    if (digits.length > 3) formatted += '-' + digits.slice(3, 6);
-    if (digits.length > 6) formatted += '-' + digits.slice(6, 10);
-    return '+63 ' + formatted;
+  const validateStep1Field = (key, val) => {
+    switch (key) {
+      case 'addressLine1':
+        return validateStreet(val).error;
+      case 'addressLine2':
+        return validateOptionalText(val, 'Address line 2', { max: 200 }).error;
+      case 'city':
+        return validateCityOrProvince(val, 'City / Municipality').error;
+      case 'province':
+        return validateCityOrProvince(val, 'Province').error;
+      case 'postalCode':
+        return validatePostalCode(val).error;
+      case 'notes':
+        return validateOptionalText(val, 'Delivery notes', { max: 500 }).error;
+      case 'promotionCode':
+        return validateOptionalText(val, 'Promo code', { max: 40 }).error;
+      default:
+        return null;
+    }
   };
 
   useEffect(() => {
     getMe()
       .then(res => {
         if (res?.data) {
+          setIsLoggedIn(true);
           const u = res.data;
           const defaultAddr = u.addresses?.[0];
+          const rawPhone = u.phone || defaultAddr?.phone || '';
+          const normalizedPhone = rawPhone ? formatPhMobileInput(rawPhone) : '+63 ';
           setForm(prev => ({
             ...prev,
             firstName: u.firstName || prev.firstName,
             lastName: u.lastName || prev.lastName,
             email: u.email || prev.email,
-            phone: u.phone || defaultAddr?.phone || prev.phone,
+            phone: normalizedPhone,
             addressLine1: defaultAddr?.addressLine1 || prev.addressLine1,
             addressLine2: defaultAddr?.addressLine2 || prev.addressLine2,
+            region: defaultAddr?.region || prev.region,
+            barangay: defaultAddr?.barangay || prev.barangay,
             city: defaultAddr?.city || prev.city,
             province: defaultAddr?.province || prev.province,
+            regionCode: defaultAddr?.regionCode || prev.regionCode,
+            provinceCode: defaultAddr?.provinceCode || prev.provinceCode,
+            cityCode: defaultAddr?.cityCode || prev.cityCode,
+            barangayCode: defaultAddr?.barangayCode || prev.barangayCode,
+            addressSource: defaultAddr?.addressSource || prev.addressSource,
             postalCode: defaultAddr?.postalCode || prev.postalCode
           }));
         }
       })
-      .catch(() => {});
+      .catch(() => { setIsLoggedIn(false); });
   }, []);
 
-  const setField = (key, val) => setForm(p => ({ ...p, [key]: val }));
+  const setField = (key, val) => {
+    setForm(p => ({ ...p, [key]: val }));
+    if (fieldErrors[key]) {
+      const err = ['firstName', 'lastName', 'email', 'phone'].includes(key)
+        ? validateStep0Field(key, val)
+        : validateStep1Field(key, val);
+      setFieldErrors(fe => ({ ...fe, [key]: err }));
+    }
+  };
 
   const handleSubmitOrder = async () => {
+    if (loading) return;
     setLoading(true);
     setError(null);
     try {
+      const phoneNormalized = normalizePhMobile(form.phone, { required: true });
+      const emailNormalized = validateEmail(form.email, { required: !isLoggedIn, applyPolicy: !isLoggedIn, policy: EMAIL_POLICY });
       const res = await createOrder({
-        shippingFullName: `${form.firstName} ${form.lastName}`,
-        shippingPhone: form.phone,
-        shippingAddressLine1: form.addressLine1,
-        shippingAddressLine2: form.addressLine2,
-        shippingCity: form.city,
-        shippingProvince: form.province,
-        shippingPostalCode: form.postalCode,
-        guestEmail: form.email,
-        notes: form.notes,
-        promotionCode: form.promotionCode || undefined,
+        shippingFullName: `${form.firstName.trim()} ${form.lastName.trim()}`.trim(),
+        shippingPhone: phoneNormalized.value || form.phone,
+        shippingAddressLine1: form.addressLine1.trim(),
+        shippingAddressLine2: form.addressLine2.trim() || undefined,
+        shippingBarangay: form.barangay || undefined,
+        shippingCity: form.city.trim(),
+        shippingProvince: form.province.trim(),
+        shippingRegion: form.region || undefined,
+        shippingRegionCode: form.regionCode || undefined,
+        shippingProvinceCode: form.provinceCode || undefined,
+        shippingCityCode: form.cityCode || undefined,
+        shippingBarangayCode: form.barangayCode || undefined,
+        shippingAddressSource: form.addressSource || 'MANUAL',
+        shippingPostalCode: form.postalCode.trim(),
+        ...(isLoggedIn ? {} : { guestEmail: emailNormalized.value || form.email.trim().toLowerCase() }),
+        notes: form.notes.trim() || undefined,
+        promotionCode: form.promotionCode.trim() || undefined,
         paymentMethod: form.paymentMethod
       });
       setOrder(res.data);
@@ -226,98 +296,188 @@ export default function CheckoutPage() {
 
         {/* STEP 0: Customer Info */}
         {step === 0 && (
-          <div>
+          <form
+            noValidate
+            onSubmit={e => {
+              e.preventDefault();
+              setError(null);
+              const errors = {
+                firstName: validateStep0Field('firstName', form.firstName),
+                lastName: validateStep0Field('lastName', form.lastName),
+                email: validateStep0Field('email', form.email),
+                phone: validateStep0Field('phone', form.phone)
+              };
+              setFieldErrors(prev => ({ ...prev, ...errors }));
+              if (Object.values(errors).some(Boolean)) {
+                focusFirstInvalidField(errors, { firstName: 'firstName', lastName: 'lastName', email: 'email', phone: 'phone' });
+                return;
+              }
+              setStep(1);
+            }}
+          >
             <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, marginBottom: 'var(--space-6)' }}>Customer Information</h2>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
               <div className="form-group">
                 <label className="form-label" htmlFor="firstName">First Name *</label>
-                <input id="firstName" className="form-input" placeholder="e.g. Juan" value={form.firstName} onChange={e => setField('firstName', e.target.value)} required />
+                <input
+                  id="firstName"
+                  className="form-input"
+                  placeholder="e.g. Juan"
+                  value={form.firstName}
+                  onChange={e => setField('firstName', e.target.value)}
+                  onBlur={() => setFieldErrors(p => ({ ...p, firstName: validateStep0Field('firstName', form.firstName) }))}
+                  required
+                  aria-required="true"
+                  aria-invalid={Boolean(fieldErrors.firstName)}
+                  aria-describedby={fieldErrors.firstName ? 'firstName-err' : undefined}
+                  maxLength={60}
+                />
+                <InlineFieldError id="firstName-err" error={fieldErrors.firstName} />
               </div>
               <div className="form-group">
                 <label className="form-label" htmlFor="lastName">Last Name *</label>
-                <input id="lastName" className="form-input" placeholder="e.g. Dela Cruz" value={form.lastName} onChange={e => setField('lastName', e.target.value)} required />
+                <input
+                  id="lastName"
+                  className="form-input"
+                  placeholder="e.g. Dela Cruz"
+                  value={form.lastName}
+                  onChange={e => setField('lastName', e.target.value)}
+                  onBlur={() => setFieldErrors(p => ({ ...p, lastName: validateStep0Field('lastName', form.lastName) }))}
+                  required
+                  aria-required="true"
+                  aria-invalid={Boolean(fieldErrors.lastName)}
+                  aria-describedby={fieldErrors.lastName ? 'lastName-err' : undefined}
+                  maxLength={60}
+                />
+                <InlineFieldError id="lastName-err" error={fieldErrors.lastName} />
               </div>
             </div>
             <div className="form-group">
-              <label className="form-label" htmlFor="email">Email Address (@gmail.com) *</label>
-              <input id="email" type="email" className="form-input" placeholder="e.g. juan.delacruz@gmail.com" value={form.email} onChange={e => setField('email', e.target.value)} required />
-              {form.email && !form.email.trim().toLowerCase().endsWith('@gmail.com') && (
-                <span className="form-error" style={{ color: 'var(--color-error)' }}>Must be a valid @gmail.com address</span>
-              )}
+              <label className="form-label" htmlFor="email">
+                Email Address *
+              </label>
+              <input
+                id="email"
+                type="email"
+                className="form-input"
+                placeholder="name@gmail.com"
+                value={form.email}
+                onChange={e => setField('email', e.target.value)}
+                onBlur={() => setFieldErrors(p => ({ ...p, email: validateStep0Field('email', form.email) }))}
+                required
+                aria-required="true"
+                aria-invalid={Boolean(fieldErrors.email)}
+                aria-describedby={fieldErrors.email ? 'email-err' : undefined}
+                readOnly={isLoggedIn}
+                autoComplete="email"
+                maxLength={254}
+              />
+              <InlineFieldError id="email-err" error={fieldErrors.email} />
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor="phone">Mobile Number (PH International) *</label>
               <input
                 id="phone"
                 type="tel"
-                inputMode="numeric"
+                inputMode="tel"
+                autoComplete="tel"
                 maxLength={16}
                 className="form-input"
-                placeholder="+63 917-123-4567"
+                placeholder="+63 9XX-XXX-YYYY"
                 value={form.phone}
-                onKeyDown={e => {
-                  if ((e.key === 'Backspace' || e.key === 'Delete') && (e.currentTarget.selectionStart ?? 0) <= 4 && (e.currentTarget.selectionEnd ?? 0) <= 4) {
-                    e.preventDefault();
-                  }
-                }}
-                onChange={e => setField('phone', formatPhMobile(e.target.value))}
+                onKeyDown={handlePhMobileKeyDown}
+                onChange={e => setField('phone', formatPhMobileInput(e.target.value))}
+                onBlur={() => setFieldErrors(p => ({ ...p, phone: validateStep0Field('phone', form.phone) }))}
                 required
+                aria-required="true"
+                aria-invalid={Boolean(fieldErrors.phone)}
+                aria-describedby={fieldErrors.phone ? 'phone-err' : 'phone-hint'}
               />
-              <span className="form-error" style={{ color: form.phone.length > 4 && !PH_MOBILE_REGEX.test(form.phone) ? 'var(--color-error)' : 'var(--color-text-subtle)' }}>
+              <InlineFieldError id="phone-err" error={fieldErrors.phone} />
+              <span id="phone-hint" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', display: 'block', marginTop: 3 }}>
                 Format: +63 9XX-XXX-YYYY (e.g. +63 917-123-4567)
               </span>
             </div>
-            <button
-              className="btn btn-primary btn-lg btn-full"
-              onClick={() => {
-                setError(null);
-                if (!/^[A-Za-z\s\-'.]+$/.test(form.firstName.trim())) {
-                  setError('First name must contain only letters');
-                  return;
-                }
-                if (!/^[A-Za-z\s\-'.]+$/.test(form.lastName.trim())) {
-                  setError('Last name must contain only letters');
-                  return;
-                }
-                if (!form.email.trim().toLowerCase().endsWith('@gmail.com')) {
-                  setError('Email must be an @gmail.com address');
-                  return;
-                }
-                if (!PH_MOBILE_REGEX.test(form.phone)) {
-                  setError('Phone must be a valid Philippine mobile number (+63 9XX-XXX-YYYY)');
-                  return;
-                }
-                setStep(1);
-              }}
-              disabled={!form.firstName || !form.lastName || !form.email || !PH_MOBILE_REGEX.test(form.phone)}
-            >
+            <button type="submit" className="btn btn-primary btn-lg btn-full">
               Continue to Shipping
             </button>
-          </div>
+          </form>
         )}
 
         {/* STEP 1: Shipping */}
         {step === 1 && (
-          <div>
+          <form
+            noValidate
+            onSubmit={e => {
+              e.preventDefault();
+              setError(null);
+              const errors = {
+                addressLine1: validateStep1Field('addressLine1', form.addressLine1),
+                addressLine2: validateStep1Field('addressLine2', form.addressLine2),
+                city: validateStep1Field('city', form.city),
+                province: validateStep1Field('province', form.province),
+                postalCode: validateStep1Field('postalCode', form.postalCode),
+                notes: validateStep1Field('notes', form.notes),
+                promotionCode: validateStep1Field('promotionCode', form.promotionCode)
+              };
+              if (form.regionCode && !form.barangayCode) {
+                errors.city = errors.city || 'Please complete Region, City, and Barangay selection or switch to manual entry.';
+              }
+              setFieldErrors(prev => ({ ...prev, ...errors }));
+              if (Object.values(errors).some(Boolean)) {
+                focusFirstInvalidField(errors, {
+                  addressLine1: 'addressLine1',
+                  addressLine2: 'addressLine2',
+                  city: 'psgc-city',
+                  province: 'psgc-province',
+                  postalCode: 'postalCode',
+                  promotionCode: 'promoCode',
+                  notes: 'notes'
+                });
+                return;
+              }
+              setStep(2);
+            }}
+          >
             <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, marginBottom: 'var(--space-6)' }}>Shipping Address (FR-3.5)</h2>
             <div className="form-group">
-              <label className="form-label" htmlFor="addressLine1">Address Line 1 *</label>
-              <input id="addressLine1" className="form-input" placeholder="Street, building, unit" value={form.addressLine1} onChange={e => setField('addressLine1', e.target.value)} required />
+              <label className="form-label" htmlFor="addressLine1">Street Address *</label>
+              <input
+                id="addressLine1"
+                className="form-input"
+                placeholder="Street, building, house/unit no."
+                value={form.addressLine1}
+                onChange={e => setField('addressLine1', e.target.value)}
+                onBlur={() => setFieldErrors(p => ({ ...p, addressLine1: validateStep1Field('addressLine1', form.addressLine1) }))}
+                required
+                aria-required="true"
+                aria-invalid={Boolean(fieldErrors.addressLine1)}
+                aria-describedby={fieldErrors.addressLine1 ? 'addressLine1-err' : undefined}
+                maxLength={200}
+              />
+              <InlineFieldError id="addressLine1-err" error={fieldErrors.addressLine1} />
             </div>
             <div className="form-group">
-              <label className="form-label" htmlFor="addressLine2">Address Line 2</label>
-              <input id="addressLine2" className="form-input" placeholder="Barangay, landmark (optional)" value={form.addressLine2} onChange={e => setField('addressLine2', e.target.value)} />
+              <label className="form-label" htmlFor="addressLine2">Address Line 2 / Landmark <span className="form-optional">(optional)</span></label>
+              <input
+                id="addressLine2"
+                className="form-input"
+                placeholder="Building, landmark, floor"
+                value={form.addressLine2}
+                onChange={e => setField('addressLine2', e.target.value)}
+                onBlur={() => setFieldErrors(p => ({ ...p, addressLine2: validateStep1Field('addressLine2', form.addressLine2) }))}
+                aria-invalid={Boolean(fieldErrors.addressLine2)}
+                aria-describedby={fieldErrors.addressLine2 ? 'addressLine2-err' : undefined}
+                maxLength={200}
+              />
+              <InlineFieldError id="addressLine2-err" error={fieldErrors.addressLine2} />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
-              <div className="form-group">
-                <label className="form-label" htmlFor="city">City / Municipality *</label>
-                <input id="city" className="form-input" value={form.city} onChange={e => setField('city', e.target.value)} required />
+            <PhilippineAddressPicker value={form} onChange={setForm} />
+            {(fieldErrors.city || fieldErrors.province) && (
+              <div style={{ marginBottom: 'var(--space-4)' }}>
+                <InlineFieldError id="shipping-loc-err" error={fieldErrors.city || fieldErrors.province} />
               </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="province">Province *</label>
-                <input id="province" className="form-input" value={form.province} onChange={e => setField('province', e.target.value)} required />
-              </div>
-            </div>
+            )}
             <div className="form-group">
               <label className="form-label" htmlFor="postalCode">Postal Code (4 Digits) *</label>
               <input
@@ -329,39 +489,52 @@ export default function CheckoutPage() {
                 placeholder="e.g. 1000, 1200"
                 value={form.postalCode}
                 onChange={e => setField('postalCode', e.target.value.replace(/\D/g, '').slice(0, 4))}
+                onBlur={() => setFieldErrors(p => ({ ...p, postalCode: validateStep1Field('postalCode', form.postalCode) }))}
                 required
+                aria-required="true"
+                aria-invalid={Boolean(fieldErrors.postalCode)}
+                aria-describedby={fieldErrors.postalCode ? 'postalCode-err' : undefined}
               />
-              <span className="form-error" style={{ color: form.postalCode && form.postalCode.length !== 4 ? 'var(--color-error)' : 'var(--color-text-subtle)' }}>
-                Philippine postal code must be exactly 4 digits
-              </span>
+              <InlineFieldError id="postalCode-err" error={fieldErrors.postalCode} />
             </div>
             <div className="form-group">
-              <label className="form-label" htmlFor="promoCode">Promo Code (Try STRIDE10 or LAUNCH500)</label>
-              <input id="promoCode" className="form-input" placeholder="e.g. STRIDE10" value={form.promotionCode} onChange={e => setField('promotionCode', e.target.value.toUpperCase())} />
+              <label className="form-label" htmlFor="promoCode">Promo Code <span className="form-optional">(optional — try STRIDE10 or LAUNCH500)</span></label>
+              <input
+                id="promoCode"
+                className="form-input"
+                placeholder="e.g. STRIDE10"
+                value={form.promotionCode}
+                onChange={e => setField('promotionCode', e.target.value.toUpperCase())}
+                onBlur={() => setFieldErrors(p => ({ ...p, promotionCode: validateStep1Field('promotionCode', form.promotionCode) }))}
+                aria-invalid={Boolean(fieldErrors.promotionCode)}
+                aria-describedby={fieldErrors.promotionCode ? 'promoCode-err' : undefined}
+                maxLength={40}
+              />
+              <InlineFieldError id="promoCode-err" error={fieldErrors.promotionCode} />
             </div>
             <div className="form-group">
-              <label className="form-label" htmlFor="notes">Delivery Instructions</label>
-              <textarea id="notes" className="form-textarea" rows={2} placeholder="Gate code, landmark, or instructions for rider" value={form.notes} onChange={e => setField('notes', e.target.value)} />
+              <label className="form-label" htmlFor="notes">Delivery Instructions <span className="form-optional">(optional)</span></label>
+              <textarea
+                id="notes"
+                className="form-textarea"
+                rows={2}
+                placeholder="Gate code, landmark, or instructions for rider"
+                value={form.notes}
+                onChange={e => setField('notes', e.target.value)}
+                onBlur={() => setFieldErrors(p => ({ ...p, notes: validateStep1Field('notes', form.notes) }))}
+                aria-invalid={Boolean(fieldErrors.notes)}
+                aria-describedby={fieldErrors.notes ? 'notes-err' : undefined}
+                maxLength={500}
+              />
+              <InlineFieldError id="notes-err" error={fieldErrors.notes} />
             </div>
             <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
-              <button className="btn btn-outline" onClick={() => setStep(0)}>Back</button>
-              <button
-                className="btn btn-primary btn-lg"
-                style={{ flex: 1 }}
-                onClick={() => {
-                  setError(null);
-                  if (!/^\d{4}$/.test(form.postalCode)) {
-                    setError('Postal code must be exactly 4 digits');
-                    return;
-                  }
-                  setStep(2);
-                }}
-                disabled={!form.addressLine1 || !form.city || !form.province || form.postalCode.length !== 4}
-              >
+              <button type="button" className="btn btn-outline" onClick={() => setStep(0)}>Back</button>
+              <button type="submit" className="btn btn-primary btn-lg" style={{ flex: 1 }}>
                 Continue to Payment Method
               </button>
             </div>
-          </div>
+          </form>
         )}
 
         {/* STEP 2: Select E-Wallet & Place Order (FR-4.1, FR-4.2) */}
@@ -374,7 +547,14 @@ export default function CheckoutPage() {
               <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', lineHeight: 'var(--leading-relaxed)' }}>
                 <strong>{form.firstName} {form.lastName}</strong> ({form.phone})<br />
                 {form.email}<br />
-                {form.addressLine1}, {form.addressLine2 && form.addressLine2 + ', '}{form.city}, {form.province} {form.postalCode}
+                {form.addressLine1}, {form.addressLine2 && form.addressLine2 + ', '}
+                {form.barangay && `Brgy. ${form.barangay}, `}
+                {form.city}, {form.province}{form.region ? `, ${form.region}` : ''} {form.postalCode}
+                {form.addressSource === 'PSGC_VERIFIED' && form.cityCode && (
+                  <span style={{ display: 'inline-block', marginLeft: 8, background: 'rgba(22,163,74,0.12)', color: '#166534', padding: '1px 7px', borderRadius: 99, fontSize: '11px', fontWeight: 700 }}>
+                    ✓ PSGC Verified
+                  </span>
+                )}
               </p>
               {form.promotionCode && (
                 <p style={{ marginTop: 'var(--space-3)', fontSize: 'var(--text-sm)', color: 'var(--color-brand-primary)', fontWeight: 600 }}>

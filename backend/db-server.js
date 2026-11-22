@@ -50,6 +50,24 @@ async function start(options = {}) {
     }
   }
 
+  // Apply idempotent additive migrations (005+) for existing PGlite databases
+  const migrationsDir = path.join(__dirname, '../database/migrations');
+  if (fs.existsSync(migrationsDir)) {
+    const migrationFiles = fs.readdirSync(migrationsDir)
+      .filter((f) => /^00[5-9]|^0[1-9]\d|^[1-9]\d\d/.test(f) && f.endsWith('.sql'))
+      .sort();
+    for (const file of migrationFiles) {
+      try {
+        const migSql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
+        await db.exec(migSql);
+      } catch (migErr) {
+        if (!migErr.message.includes('already exists')) {
+          console.warn(`Migration ${file} notice:`, migErr.message);
+        }
+      }
+    }
+  }
+
   const server = new PGLiteSocketServer({
     db,
     port: 5432,

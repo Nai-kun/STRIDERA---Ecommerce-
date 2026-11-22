@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { getCart, updateCartItem, removeCartItem } from '../../lib/api';
 import HeaderAuthActions from '../../components/HeaderAuthActions';
+import InlineFieldError from '../../components/InlineFieldError';
+import { validateOptionalText } from '../../lib/validation';
 
 export default function CartPage() {
   const [cart, setCart] = useState(null);
@@ -65,8 +67,19 @@ export default function CartPage() {
     e.preventDefault();
     setPromoError(null);
 
-    const code = promoCode.trim().toUpperCase();
-    if (!code) return;
+    const check = validateOptionalText(promoCode, 'Promo code', { max: 40 });
+    if (!check.valid) {
+      setPromoError(check.error);
+      document.getElementById('cart-promo-code')?.focus();
+      return;
+    }
+
+    const code = (check.value || '').toUpperCase();
+    if (!code) {
+      setPromoError('Please enter a promo code.');
+      document.getElementById('cart-promo-code')?.focus();
+      return;
+    }
 
     const subtotal = cart?.subtotalCentavos || 0;
 
@@ -262,28 +275,34 @@ export default function CartPage() {
               </div>
 
               {/* Promo Code Form */}
-              <form onSubmit={handleApplyPromo} style={{ margin: 'var(--space-4) 0' }}>
+              <form onSubmit={handleApplyPromo} noValidate style={{ margin: 'var(--space-4) 0' }}>
+                <label htmlFor="cart-promo-code" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
+                  Promo Code <span className="form-optional">(optional)</span>
+                </label>
                 <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
                   <input
+                    id="cart-promo-code"
                     type="text"
+                    maxLength={40}
                     placeholder="Promo code (e.g. STRIDE10)"
                     value={promoCode}
-                    onChange={e => setPromoCode(e.target.value)}
+                    onChange={e => {
+                      setPromoCode(e.target.value);
+                      if (promoError) setPromoError(null);
+                    }}
+                    aria-invalid={Boolean(promoError)}
+                    aria-describedby={promoError ? 'cart-promo-error' : undefined}
                     style={{
                       flex: 1,
                       padding: 'var(--space-2) var(--space-3)',
                       borderRadius: 'var(--radius-md)',
-                      border: '1px solid var(--color-border)',
+                      border: `1px solid ${promoError ? 'var(--color-error)' : 'var(--color-border)'}`,
                       fontSize: 'var(--text-sm)'
                     }}
                   />
                   <button type="submit" className="btn btn-outline btn-sm">Apply</button>
                 </div>
-                {promoError && (
-                  <p style={{ color: 'var(--color-error)', fontSize: 'var(--text-xs)', marginTop: 'var(--space-1)' }}>
-                    {promoError}
-                  </p>
-                )}
+                <InlineFieldError id="cart-promo-error" error={promoError} />
               </form>
 
               {/* Total & Checkout */}
@@ -297,7 +316,7 @@ export default function CartPage() {
               </Link>
 
               <div style={{ marginTop: 'var(--space-4)', textAlign: 'center', fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>
-                🔒 Secure E-Wallet Checkout via PayMongo Sandbox (GCash, Maya, GrabPay)
+                🔒 Secure E-Wallet Checkout (GCash, Maya, PayPal)
               </div>
             </div>
           </div>

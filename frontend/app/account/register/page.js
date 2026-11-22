@@ -3,73 +3,142 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import {
+  EMAIL_POLICY,
+  formatPhMobileInput,
+  handlePhMobileKeyDown,
+  normalizePhMobile,
+  validateEmail,
+  validatePersonName,
+  validatePassword,
+  focusFirstInvalidField
+} from '../../../lib/validation';
+import InlineFieldError from '../../../components/InlineFieldError';
+import PasswordInput from '../../../components/PasswordInput';
 
 const API = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 export default function RegisterPage() {
   const router = useRouter();
-  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', phone: '+63 ', password: '', confirmPassword: '' });
+  const [form, setForm] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '+63 ',
+    password: '',
+    confirmPassword: ''
+  });
+  const [fieldErrors, setFieldErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const setField = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const validateField = (field, rawVal, nextForm = form) => {
+    switch (field) {
+      case 'firstName': {
+        const r = validatePersonName(rawVal, 'First name');
+        return r.valid ? null : r.error;
+      }
+      case 'lastName': {
+        const r = validatePersonName(rawVal, 'Last name');
+        return r.valid ? null : r.error;
+      }
+      case 'email': {
+        const r = validateEmail(rawVal, { required: true, applyPolicy: true, policy: EMAIL_POLICY });
+        return r.valid ? null : r.error;
+      }
+      case 'phone': {
+        const r = normalizePhMobile(rawVal, { required: true });
+        return r.valid ? null : r.error;
+      }
+      case 'password': {
+        const r = validatePassword(rawVal, { required: true, checkStrength: true });
+        return r.valid ? null : r.error;
+      }
+      case 'confirmPassword': {
+        if (!rawVal) return 'Please confirm your password.';
+        return rawVal === nextForm.password ? null : 'Passwords do not match.';
+      }
+      default:
+        return null;
+    }
+  };
 
-  const PH_MOBILE_REGEX = /^\+63 9\d{2}-\d{3}-\d{4}$/;
+  const setField = (k, v) => {
+    setForm(prev => {
+      const next = { ...prev, [k]: v };
+      if (fieldErrors[k]) {
+        setFieldErrors(fe => ({ ...fe, [k]: validateField(k, v, next) }));
+      }
+      if (k === 'password' && prev.confirmPassword && fieldErrors.confirmPassword) {
+        setFieldErrors(fe => ({ ...fe, confirmPassword: validateField('confirmPassword', prev.confirmPassword, next) }));
+      }
+      return next;
+    });
+  };
 
-  const formatPhMobile = (raw) => {
-    let digits = raw.replace(/\D/g, '');
-    if (digits.startsWith('63')) digits = digits.slice(2);
-    else if (digits.startsWith('0')) digits = digits.slice(1);
-    digits = digits.slice(0, 10);
-    let formatted = digits.slice(0, 3);
-    if (digits.length > 3) formatted += '-' + digits.slice(3, 6);
-    if (digits.length > 6) formatted += '-' + digits.slice(6, 10);
-    return '+63 ' + formatted;
+  const handleBlur = (k) => {
+    setFieldErrors(prev => ({ ...prev, [k]: validateField(k, form[k], form) }));
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!/^[A-Za-z\s\-'.]+$/.test(form.firstName.trim())) {
-      setError('First name must contain only letters');
-      return;
-    }
-    if (!/^[A-Za-z\s\-'.]+$/.test(form.lastName.trim())) {
-      setError('Last name must contain only letters');
-      return;
-    }
-    if (!form.email.trim().toLowerCase().endsWith('@gmail.com')) {
-      setError('Email address must end with @gmail.com');
-      return;
-    }
-    if (!PH_MOBILE_REGEX.test(form.phone)) {
-      setError('Mobile number must be in Philippine international format: +63 9XX-XXX-YYYY (e.g. +63 917-123-4567)');
-      return;
-    }
-    if (form.password !== form.confirmPassword) {
-      setError('Passwords do not match');
-      return;
-    }
-    setLoading(true);
+    if (loading) return;
     setError(null);
+
+    const errors = {
+      firstName: validateField('firstName', form.firstName),
+      lastName: validateField('lastName', form.lastName),
+      email: validateField('email', form.email),
+      phone: validateField('phone', form.phone),
+      password: validateField('password', form.password),
+      confirmPassword: validateField('confirmPassword', form.confirmPassword)
+    };
+    setFieldErrors(errors);
+
+    const firstInvalid = Object.values(errors).some(Boolean);
+    if (firstInvalid) {
+      focusFirstInvalidField(errors, {
+        firstName: 'reg-firstName',
+        lastName: 'reg-lastName',
+        email: 'reg-email',
+        phone: 'reg-phone',
+        password: 'reg-password',
+        confirmPassword: 'reg-confirm'
+      });
+      return;
+    }
+
+    const emailCheck = validateEmail(form.email, { required: true, applyPolicy: true, policy: EMAIL_POLICY });
+    const phoneCheck = normalizePhMobile(form.phone, { required: true });
+
+    setLoading(true);
     try {
       const res = await fetch(`${API}/auth/register`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ firstName: form.firstName, lastName: form.lastName, email: form.email, phone: form.phone, password: form.password })
+        body: JSON.stringify({
+          firstName: form.firstName.trim(),
+          lastName: form.lastName.trim(),
+          email: emailCheck.value,
+          phone: phoneCheck.value,
+          password: form.password,
+          confirmPassword: form.confirmPassword
+        })
       });
       const data = await res.json();
       if (!data.success) {
+        if (data.fieldErrors) setFieldErrors(prev => ({ ...prev, ...data.fieldErrors }));
         const detailMsg = data.error?.details?.[0]?.msg;
-        throw new Error(detailMsg || data.error?.message || data.message || 'Registration failed');
+        throw new Error(data.message || detailMsg || data.error?.message || 'Registration failed');
       }
       if (typeof window !== 'undefined') {
         if (data.data?.token) localStorage.setItem('stridera_token', data.data.token);
         if (data.data?.user) localStorage.setItem('stridera_user', JSON.stringify(data.data.user));
       }
       router.push('/');
-    } catch (e) {
-      setError(e.message);
+    } catch (err) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -100,54 +169,128 @@ export default function RegisterPage() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
             <div className="form-group">
               <label className="form-label" htmlFor="reg-firstName">First Name *</label>
-              <input id="reg-firstName" className="form-input" value={form.firstName} onChange={e => setField('firstName', e.target.value)} required />
+              <input
+                id="reg-firstName"
+                className="form-input"
+                placeholder="e.g. Juan"
+                value={form.firstName}
+                onChange={e => setField('firstName', e.target.value)}
+                onBlur={() => handleBlur('firstName')}
+                required
+                aria-required="true"
+                aria-invalid={Boolean(fieldErrors.firstName)}
+                aria-describedby={fieldErrors.firstName ? 'reg-firstName-err' : undefined}
+                maxLength={60}
+              />
+              <InlineFieldError id="reg-firstName-err" error={fieldErrors.firstName} />
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor="reg-lastName">Last Name *</label>
-              <input id="reg-lastName" className="form-input" value={form.lastName} onChange={e => setField('lastName', e.target.value)} required />
+              <input
+                id="reg-lastName"
+                className="form-input"
+                placeholder="e.g. Dela Cruz"
+                value={form.lastName}
+                onChange={e => setField('lastName', e.target.value)}
+                onBlur={() => handleBlur('lastName')}
+                required
+                aria-required="true"
+                aria-invalid={Boolean(fieldErrors.lastName)}
+                aria-describedby={fieldErrors.lastName ? 'reg-lastName-err' : undefined}
+                maxLength={60}
+              />
+              <InlineFieldError id="reg-lastName-err" error={fieldErrors.lastName} />
             </div>
           </div>
+
           <div className="form-group">
             <label className="form-label" htmlFor="reg-email">Email Address *</label>
-            <input id="reg-email" type="email" className="form-input" value={form.email} onChange={e => setField('email', e.target.value)} required autoComplete="email" />
+            <input
+              id="reg-email"
+              type="email"
+              className="form-input"
+              placeholder="name@gmail.com"
+              value={form.email}
+              onChange={e => setField('email', e.target.value)}
+              onBlur={() => handleBlur('email')}
+              required
+              aria-required="true"
+              aria-invalid={Boolean(fieldErrors.email)}
+              aria-describedby={fieldErrors.email ? 'reg-email-err' : undefined}
+              autoComplete="email"
+              maxLength={254}
+            />
+            <InlineFieldError id="reg-email-err" error={fieldErrors.email} />
           </div>
+
           <div className="form-group">
             <label className="form-label" htmlFor="reg-phone">Mobile Number (PH International) *</label>
             <input
               id="reg-phone"
               type="tel"
-              inputMode="numeric"
+              inputMode="tel"
+              autoComplete="tel"
               maxLength={16}
-              pattern="^\+63 9\d{2}-\d{3}-\d{4}$"
               required
+              aria-required="true"
+              aria-invalid={Boolean(fieldErrors.phone)}
+              aria-describedby={fieldErrors.phone ? 'reg-phone-err' : 'reg-phone-hint'}
               className="form-input"
-              placeholder="+63 917-123-4567"
+              placeholder="+63 9XX-XXX-YYYY"
               value={form.phone}
-              onKeyDown={e => {
-                if ((e.key === 'Backspace' || e.key === 'Delete') && (e.currentTarget.selectionStart ?? 0) <= 4 && (e.currentTarget.selectionEnd ?? 0) <= 4) {
-                  e.preventDefault();
-                }
-              }}
-              onChange={e => setField('phone', formatPhMobile(e.target.value))}
+              onKeyDown={handlePhMobileKeyDown}
+              onChange={e => setField('phone', formatPhMobileInput(e.target.value))}
+              onBlur={() => handleBlur('phone')}
             />
-            <span className="form-error" style={{ color: form.phone.length > 4 && !PH_MOBILE_REGEX.test(form.phone) ? 'var(--color-error)' : 'var(--color-text-subtle)' }}>
-              Format: +63 9XX-XXX-YYYY (12 digits, e.g. +63 917-123-4567) — {form.phone.replace(/\D/g, '').length}/12 digits
+            <InlineFieldError id="reg-phone-err" error={fieldErrors.phone} />
+            <span id="reg-phone-hint" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', display: 'block', marginTop: 3 }}>
+              Format: +63 9XX-XXX-YYYY ({form.phone.replace(/\D/g, '').length}/12 digits)
             </span>
           </div>
+
           <div className="form-group">
             <label className="form-label" htmlFor="reg-password">Password *</label>
-            <input id="reg-password" type="password" className="form-input" value={form.password} onChange={e => setField('password', e.target.value)} required autoComplete="new-password" minLength={8} />
-            <span className="form-error" style={{ color: 'var(--color-text-subtle)' }}>Minimum 8 characters</span>
+            <PasswordInput
+              id="reg-password"
+              className="form-input"
+              value={form.password}
+              onChange={e => setField('password', e.target.value)}
+              onBlur={() => handleBlur('password')}
+              required
+              aria-required="true"
+              aria-invalid={Boolean(fieldErrors.password)}
+              aria-describedby={fieldErrors.password ? 'reg-password-err' : 'reg-password-hint'}
+              autoComplete="new-password"
+              minLength={8}
+            />
+            <InlineFieldError id="reg-password-err" error={fieldErrors.password} />
+            <span id="reg-password-hint" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', display: 'block', marginTop: 3 }}>
+              Minimum 8 characters with at least 1 letter and 1 number
+            </span>
           </div>
+
           <div className="form-group">
             <label className="form-label" htmlFor="reg-confirm">Confirm Password *</label>
-            <input id="reg-confirm" type="password" className="form-input" value={form.confirmPassword} onChange={e => setField('confirmPassword', e.target.value)} required autoComplete="new-password" />
+            <PasswordInput
+              id="reg-confirm"
+              className="form-input"
+              toggleLabel="confirm password"
+              value={form.confirmPassword}
+              onChange={e => setField('confirmPassword', e.target.value)}
+              onBlur={() => handleBlur('confirmPassword')}
+              required
+              aria-required="true"
+              aria-invalid={Boolean(fieldErrors.confirmPassword)}
+              aria-describedby={fieldErrors.confirmPassword ? 'reg-confirm-err' : undefined}
+              autoComplete="new-password"
+            />
+            <InlineFieldError id="reg-confirm-err" error={fieldErrors.confirmPassword} />
           </div>
 
           <button
             type="submit"
             className="btn btn-primary btn-lg btn-full"
-            disabled={loading || !form.firstName || !form.email || !PH_MOBILE_REGEX.test(form.phone) || !form.password || !form.confirmPassword}
+            disabled={loading}
             id="register-submit-btn"
           >
             {loading ? 'Creating account…' : 'Create Account'}

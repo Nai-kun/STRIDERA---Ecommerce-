@@ -97,7 +97,7 @@ async function main() {
   const adminPasswordHash = await argon2.hash('Admin@Stridera2024!');
   const admin = await prisma.user.upsert({
     where: { email: 'admin@stridera.ph' },
-    update: { role: 'ADMIN', isActive: true, accountStatus: 'ACTIVE' },
+    update: { role: 'ADMIN', isActive: true, accountStatus: 'ACTIVE', phone: '+63 917-000-0001' },
     create: {
       email: 'admin@stridera.ph',
       passwordHash: adminPasswordHash,
@@ -106,14 +106,14 @@ async function main() {
       role: 'ADMIN',
       isActive: true,
       accountStatus: 'ACTIVE',
-      phone: '+639170000001'
+      phone: '+63 917-000-0001'
     }
   });
 
   const customerPasswordHash = await argon2.hash('Customer@123!');
   const customer = await prisma.user.upsert({
     where: { email: 'demo@stridera.ph' },
-    update: { role: 'CUSTOMER', isActive: true, accountStatus: 'ACTIVE' },
+    update: { role: 'CUSTOMER', isActive: true, accountStatus: 'ACTIVE', phone: '+63 917-111-1111' },
     create: {
       email: 'demo@stridera.ph',
       passwordHash: customerPasswordHash,
@@ -122,12 +122,12 @@ async function main() {
       role: 'CUSTOMER',
       isActive: true,
       accountStatus: 'ACTIVE',
-      phone: '+639171111111',
+      phone: '+63 917-111-1111',
       addresses: {
         create: {
           label: 'Home',
           fullName: 'Juan Dela Cruz',
-          phone: '+639171111111',
+          phone: '+63 917-111-1111',
           addressLine1: '123 Ayala Avenue, Legazpi Village',
           city: 'Makati',
           province: 'Metro Manila',
@@ -147,7 +147,8 @@ async function main() {
       sellerStatus: 'APPROVED',
       storeName: 'Apex Footwear Hub',
       identificationDetails: 'DTI Reg No: DTI-NCR-2026-0084192 | BIR TIN: 412-889-102-000 | Verified Metro Manila Distributor',
-      storeLogoUrl: '/assets/logo/stridera-logo.png'
+      storeLogoUrl: '/assets/logo/stridera-logo.png',
+      phone: '+63 917-222-2222'
     },
     create: {
       email: 'seller@stridera.ph',
@@ -160,7 +161,7 @@ async function main() {
       storeDescription: 'Authorized vendor for high-performance marathon and athletic footwear in Metro Manila.',
       storeLogoUrl: '/assets/logo/stridera-logo.png',
       identificationDetails: 'DTI Reg No: DTI-NCR-2026-0084192 | BIR TIN: 412-889-102-000 | Verified Metro Manila Distributor',
-      phone: '+639172222222'
+      phone: '+63 917-222-2222'
     }
   });
 
@@ -171,7 +172,8 @@ async function main() {
       sellerStatus: 'APPROVED',
       storeName: 'Manila Sole Collective',
       identificationDetails: 'DTI Reg No: DTI-NCR-2026-0091204 | BIR TIN: 509-231-884-000 | Verified Bonifacio Global City Retailer',
-      storeLogoUrl: '/assets/logo/stridera-logo.png'
+      storeLogoUrl: '/assets/logo/stridera-logo.png',
+      phone: '+63 917-222-3333'
     },
     create: {
       email: 'sole@stridera.ph',
@@ -184,14 +186,15 @@ async function main() {
       storeDescription: 'Curated lifestyle sneakers, court classics, and everyday comfort footwear.',
       storeLogoUrl: '/assets/logo/stridera-logo.png',
       identificationDetails: 'DTI Reg No: DTI-NCR-2026-0091204 | BIR TIN: 509-231-884-000 | Verified Bonifacio Global City Retailer',
-      phone: '+639172223333'
+      phone: '+63 917-222-3333'
     }
   });
 
   const pendingSeller = await prisma.user.upsert({
     where: { email: 'pending.seller@stridera.ph' },
     update: {
-      identificationDetails: 'DTI Reg No: DTI-CAL-2026-0041982 | Pending Gov ID Verification'
+      identificationDetails: 'DTI Reg No: DTI-CAL-2026-0041982 | Pending Gov ID Verification',
+      phone: '+63 917-333-3333'
     },
     create: {
       email: 'pending.seller@stridera.ph',
@@ -203,7 +206,7 @@ async function main() {
       storeName: 'Stride Dynamics PH',
       storeDescription: 'Custom and lifestyle sneakers seeking platform approval.',
       identificationDetails: 'DTI Reg No: DTI-CAL-2026-0041982 | Pending Gov ID Verification',
-      phone: '+639173333333'
+      phone: '+63 917-333-3333'
     }
   });
 
@@ -211,7 +214,7 @@ async function main() {
   const inventoryPasswordHash = await argon2.hash('Inventory@123!');
   const inventoryManager = await prisma.user.upsert({
     where: { email: 'inventory@stridera.ph' },
-    update: { role: 'INVENTORY_MANAGER', isActive: true, accountStatus: 'ACTIVE' },
+    update: { role: 'INVENTORY_MANAGER', isActive: true, accountStatus: 'ACTIVE', phone: '+63 917-444-4444' },
     create: {
       email: 'inventory@stridera.ph',
       passwordHash: inventoryPasswordHash,
@@ -220,7 +223,7 @@ async function main() {
       role: 'INVENTORY_MANAGER',
       isActive: true,
       accountStatus: 'ACTIVE',
-      phone: '+639174444444'
+      phone: '+63 917-444-4444'
     }
   });
 
@@ -228,7 +231,7 @@ async function main() {
   const deliveryPasswordHash = await argon2.hash('Delivery@123!');
   const deliveryPersonnel = await prisma.user.upsert({
     where: { email: 'delivery@stridera.ph' },
-    update: { role: 'DELIVERY_PERSONNEL', isActive: true, accountStatus: 'ACTIVE' },
+    update: { role: 'DELIVERY_PERSONNEL', isActive: true, accountStatus: 'ACTIVE', phone: '+63 917-555-5555' },
     create: {
       email: 'delivery@stridera.ph',
       passwordHash: deliveryPasswordHash,
@@ -237,7 +240,7 @@ async function main() {
       role: 'DELIVERY_PERSONNEL',
       isActive: true,
       accountStatus: 'ACTIVE',
-      phone: '+639175555555'
+      phone: '+63 917-555-5555'
     }
   });
 
@@ -245,7 +248,7 @@ async function main() {
   const supportPasswordHash = await argon2.hash('Support@123!');
   const supportPersonnel = await prisma.user.upsert({
     where: { email: 'support@stridera.ph' },
-    update: { role: 'CUSTOMER_SUPPORT', isActive: true, accountStatus: 'ACTIVE' },
+    update: { role: 'CUSTOMER_SUPPORT', isActive: true, accountStatus: 'ACTIVE', phone: '+63 917-666-6666' },
     create: {
       email: 'support@stridera.ph',
       passwordHash: supportPasswordHash,
@@ -254,7 +257,7 @@ async function main() {
       role: 'CUSTOMER_SUPPORT',
       isActive: true,
       accountStatus: 'ACTIVE',
-      phone: '+639176666666'
+      phone: '+63 917-666-6666'
     }
   });
 
@@ -262,7 +265,7 @@ async function main() {
   const financePasswordHash = await argon2.hash('Finance@123!');
   const financeOfficer = await prisma.user.upsert({
     where: { email: 'finance@stridera.ph' },
-    update: { role: 'FINANCE_OFFICER', isActive: true, accountStatus: 'ACTIVE' },
+    update: { role: 'FINANCE_OFFICER', isActive: true, accountStatus: 'ACTIVE', phone: '+63 917-777-7777' },
     create: {
       email: 'finance@stridera.ph',
       passwordHash: financePasswordHash,
@@ -271,7 +274,7 @@ async function main() {
       role: 'FINANCE_OFFICER',
       isActive: true,
       accountStatus: 'ACTIVE',
-      phone: '+639177777777'
+      phone: '+63 917-777-7777'
     }
   });
 
@@ -780,7 +783,7 @@ async function main() {
           shippingFeeCentavos: 0,
           grandTotalCentavos: 599500,
           shippingFullName: 'Juan Dela Cruz',
-          shippingPhone: '+639171111111',
+          shippingPhone: '+63 917-111-1111',
           shippingAddressLine1: '123 Ayala Avenue, Legazpi Village',
           shippingCity: 'Makati',
           shippingProvince: 'Metro Manila',

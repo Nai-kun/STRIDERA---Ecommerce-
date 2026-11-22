@@ -4,6 +4,7 @@ const router = express.Router();
 const prisma = require('../lib/prisma');
 const { authenticate, requireSupport } = require('../middleware/auth.middleware');
 const { body, validationResult } = require('express-validator');
+const { validateRequiredText, collectFieldErrors, sendValidationError } = require('../lib/validators');
 
 function generateTicketNumber() {
   const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -13,15 +14,23 @@ function generateTicketNumber() {
 
 // POST /api/support/tickets — Authenticated user submits inquiry, complaint, cancellation, return, or refund request (FR-8.2)
 router.post('/tickets', authenticate, [
-  body('category').optional().isIn(['INQUIRY', 'COMPLAINT', 'CANCELLATION', 'RETURN', 'REFUND']),
-  body('subject').trim().notEmpty().withMessage('Subject is required'),
-  body('description').trim().notEmpty().withMessage('Description is required')
+  body('category').optional().isIn(['INQUIRY', 'COMPLAINT', 'CANCELLATION', 'RETURN', 'REFUND'])
 ], async (req, res, next) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
 
-    const { category = 'INQUIRY', orderNumber, orderId, subject, description, priority = 'MEDIUM' } = req.body;
+    const bodyData = req.body || {};
+    const collected = collectFieldErrors({
+      subject: validateRequiredText(bodyData.subject, 'Subject', { min: 3, max: 150 }),
+      description: validateRequiredText(bodyData.description, 'Details / Reason', { min: 5, max: 2000 })
+    });
+    if (!collected.ok) {
+      return sendValidationError(res, collected);
+    }
+
+    const { category = 'INQUIRY', orderNumber, orderId, priority = 'MEDIUM' } = bodyData;
+    const { subject, description } = collected.values;
 
     let order = null;
     if (orderId) {

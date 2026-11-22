@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { submitProductReview, addToWishlist } from '../../../lib/api';
 import HeaderAuthActions from '../../../components/HeaderAuthActions';
+import InlineFieldError from '../../../components/InlineFieldError';
+import { validateRequiredText, validateQuantity } from '../../../lib/validation';
 
 const API = process.env.NEXT_PUBLIC_API_URL || '/api';
 
@@ -23,6 +25,7 @@ export default function ProductDetailPage() {
   const [reviewRating, setReviewRating] = useState(5);
   const [sellerRating, setSellerRating] = useState(5);
   const [reviewComment, setReviewComment] = useState('');
+  const [reviewError, setReviewError] = useState(null);
   const [submittingReview, setSubmittingReview] = useState(false);
 
   useEffect(() => {
@@ -78,12 +81,18 @@ export default function ProductDetailPage() {
     ? Math.round((1 - priceDisplay / product.compareAtPriceCentavos) * 100) : null;
 
   const handleAddToCart = async () => {
+    if (adding) return;
     if (!selectedVariant) {
       setMessage({ type: 'error', text: 'Please select a size and color first.' });
       return;
     }
     if (!inStock) {
       setMessage({ type: 'error', text: 'This variant is out of stock.' });
+      return;
+    }
+    const qtyCheck = validateQuantity(quantity, selectedVariant.stockQuantity);
+    if (!qtyCheck.valid) {
+      setMessage({ type: 'error', text: qtyCheck.error });
       return;
     }
 
@@ -93,7 +102,7 @@ export default function ProductDetailPage() {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productVariantId: selectedVariant.id, quantity })
+        body: JSON.stringify({ productVariantId: selectedVariant.id, quantity: qtyCheck.value })
       });
       const data = await res.json();
       if (data.success) {
@@ -119,13 +128,21 @@ export default function ProductDetailPage() {
 
   const handleSubmitReview = async (e) => {
     e.preventDefault();
-    if (!reviewComment.trim()) return;
+    if (submittingReview) return;
+
+    const commentCheck = validateRequiredText(reviewComment, 'Review comment', { min: 3, max: 2000 });
+    if (!commentCheck.valid) {
+      setReviewError(commentCheck.error);
+      document.getElementById('pdp-review-comment')?.focus();
+      return;
+    }
+    setReviewError(null);
     setSubmittingReview(true);
     try {
       const res = await submitProductReview(slug, {
         rating: reviewRating,
         sellerRating,
-        comment: reviewComment
+        comment: commentCheck.value
       });
       if (res.data) {
         setProduct(prev => ({
@@ -461,32 +478,42 @@ export default function ProductDetailPage() {
             </div>
 
             {/* Submit Review Form */}
-            <form onSubmit={handleSubmitReview} style={{ background: 'var(--color-surface)', padding: 'var(--space-6)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border)' }}>
+            <form onSubmit={handleSubmitReview} noValidate style={{ background: 'var(--color-surface)', padding: 'var(--space-6)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border)' }}>
               <h3 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, marginBottom: 'var(--space-4)' }}>Write a Product &amp; Seller Review</h3>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
                 <div className="form-group">
-                  <label className="form-label">Product Rating</label>
-                  <select className="form-select" value={reviewRating} onChange={e => setReviewRating(Number(e.target.value))}>
+                  <label htmlFor="pdp-review-rating" className="form-label">Product Rating *</label>
+                  <select id="pdp-review-rating" className="form-select" value={reviewRating} onChange={e => setReviewRating(Number(e.target.value))}>
                     {[5, 4, 3, 2, 1].map(n => <option key={n} value={n}>{n} Stars {'★'.repeat(n)}</option>)}
                   </select>
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Seller Rating</label>
-                  <select className="form-select" value={sellerRating} onChange={e => setSellerRating(Number(e.target.value))}>
+                  <label htmlFor="pdp-seller-rating" className="form-label">Seller Rating *</label>
+                  <select id="pdp-seller-rating" className="form-select" value={sellerRating} onChange={e => setSellerRating(Number(e.target.value))}>
                     {[5, 4, 3, 2, 1].map(n => <option key={n} value={n}>{n} Stars {'★'.repeat(n)}</option>)}
                   </select>
                 </div>
               </div>
               <div className="form-group">
-                <label className="form-label">Your Review</label>
+                <label htmlFor="pdp-review-comment" className="form-label">Your Review *</label>
                 <textarea
+                  id="pdp-review-comment"
                   className="form-input"
                   rows={3}
+                  maxLength={2000}
+                  aria-required="true"
+                  aria-invalid={Boolean(reviewError)}
+                  aria-describedby={reviewError ? 'pdp-review-comment-error' : undefined}
                   placeholder="Share your experience with the shoe fit, quality, and merchant service…"
                   value={reviewComment}
-                  onChange={e => setReviewComment(e.target.value)}
+                  onChange={e => {
+                    setReviewComment(e.target.value);
+                    if (reviewError) setReviewError(null);
+                  }}
+                  onBlur={e => setReviewError(validateRequiredText(e.target.value, 'Review comment', { min: 3, max: 2000 }).error)}
                   required
                 />
+                <InlineFieldError id="pdp-review-comment-error" error={reviewError} />
               </div>
               <button type="submit" className="btn btn-primary" disabled={submittingReview}>
                 {submittingReview ? 'Submitting…' : 'Submit Review'}

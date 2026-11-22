@@ -3,6 +3,19 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { getSellerOrders, acceptSellerOrder, fulfillSellerOrder, cancelSellerOrder } from '../../../lib/api';
+import InlineFieldError from '../../../components/InlineFieldError';
+import {
+  validateRequiredText,
+  validateOptionalUrl,
+  validateOptionalText,
+  focusFirstInvalidField
+} from '../../../lib/validation';
+
+const FULFILL_FIELD_IDS = {
+  trackingNumber: 'so-tracking-number',
+  trackingUrl: 'so-tracking-url',
+  notes: 'so-fulfill-notes'
+};
 
 export default function SellerOrdersPage() {
   const [orders, setOrders] = useState([]);
@@ -21,6 +34,9 @@ export default function SellerOrdersPage() {
 
   const [cancelModal, setCancelModal] = useState({ open: false, orderId: null });
   const [cancelReason, setCancelReason] = useState('');
+  const [fulfillErrors, setFulfillErrors] = useState({});
+  const [cancelError, setCancelError] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const notify = (msg, isError = false) => {
     setNotification({ msg, isError });
@@ -58,27 +74,58 @@ export default function SellerOrdersPage() {
 
   const handleFulfill = async (e) => {
     e.preventDefault();
-    if (!fulfillModal.orderId) return;
+    if (!fulfillModal.orderId || submitting) return;
 
+    const trkRes = validateRequiredText(trackingForm.trackingNumber, 'Tracking number', { min: 3, max: 80 });
+    const urlRes = validateOptionalUrl(trackingForm.trackingUrl, 'Courier tracking URL');
+    const notesRes = validateOptionalText(trackingForm.notes, 'Fulfillment notes', { max: 500 });
+    const nextErrors = {
+      ...(trkRes.valid ? {} : { trackingNumber: trkRes.error }),
+      ...(urlRes.valid ? {} : { trackingUrl: urlRes.error }),
+      ...(notesRes.valid ? {} : { notes: notesRes.error })
+    };
+    setFulfillErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      focusFirstInvalidField(nextErrors, FULFILL_FIELD_IDS);
+      return;
+    }
+
+    setSubmitting(true);
     try {
-      const res = await fulfillSellerOrder(fulfillModal.orderId, trackingForm);
+      const res = await fulfillSellerOrder(fulfillModal.orderId, {
+        ...trackingForm,
+        trackingNumber: trkRes.value,
+        trackingUrl: urlRes.value || '',
+        notes: notesRes.value || ''
+      });
       if (res.success) {
         notify('Order slice marked as SHIPPED and handed off to Delivery Personnel!');
         setFulfillModal({ open: false, orderId: null });
+        setFulfillErrors({});
         setTrackingForm({ trackingNumber: '', courierName: 'STRIDERA Express Courier', trackingUrl: '', notes: '' });
         loadOrders();
       }
     } catch (err) {
       notify(err.message || 'Failed to fulfill order', true);
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleCancel = async (e) => {
     e.preventDefault();
-    if (!cancelModal.orderId) return;
+    if (!cancelModal.orderId || submitting) return;
 
+    const reasonRes = validateRequiredText(cancelReason, 'Cancellation reason', { min: 3, max: 500 });
+    if (!reasonRes.valid) {
+      setCancelError(reasonRes.error);
+      document.getElementById('so-cancel-reason')?.focus();
+      return;
+    }
+    setCancelError(null);
+    setSubmitting(true);
     try {
-      const res = await cancelSellerOrder(cancelModal.orderId, cancelReason);
+      const res = await cancelSellerOrder(cancelModal.orderId, reasonRes.value);
       if (res.success) {
         notify('Order slice cancelled and stock restored to inventory.');
         setCancelModal({ open: false, orderId: null });
@@ -87,6 +134,8 @@ export default function SellerOrdersPage() {
       }
     } catch (err) {
       notify(err.message || 'Failed to cancel order slice', true);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -279,12 +328,13 @@ export default function SellerOrdersPage() {
               Enter courier and tracking details to notify the customer and Delivery Personnel.
             </p>
 
-            <form onSubmit={handleFulfill} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+            <form onSubmit={handleFulfill} noValidate style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
               <div>
-                <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
-                  Courier / Logistics Partner
+                <label htmlFor="so-courier-name" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
+                  Courier / Logistics Partner *
                 </label>
                 <select
+                  id="so-courier-name"
                   value={trackingForm.courierName}
                   onChange={e => setTrackingForm({ ...trackingForm, courierName: e.target.value })}
                   style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
@@ -297,48 +347,76 @@ export default function SellerOrdersPage() {
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
-                  Tracking Number / Waybill
+                <label htmlFor="so-tracking-number" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
+                  Tracking Number / Waybill *
                 </label>
                 <input
+                  id="so-tracking-number"
                   type="text"
                   required
+                  aria-required="true"
+                  maxLength={80}
+                  aria-invalid={Boolean(fulfillErrors.trackingNumber)}
+                  aria-describedby={fulfillErrors.trackingNumber ? 'so-tracking-number-error' : undefined}
                   placeholder="e.g. LBC-8899123049"
                   value={trackingForm.trackingNumber}
-                  onChange={e => setTrackingForm({ ...trackingForm, trackingNumber: e.target.value })}
-                  style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                  onChange={e => {
+                    setTrackingForm({ ...trackingForm, trackingNumber: e.target.value });
+                    if (fulfillErrors.trackingNumber) setFulfillErrors(prev => ({ ...prev, trackingNumber: null }));
+                  }}
+                  onBlur={e => setFulfillErrors(prev => ({ ...prev, trackingNumber: validateRequiredText(e.target.value, 'Tracking number', { min: 3, max: 80 }).error }))}
+                  style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: `1px solid ${fulfillErrors.trackingNumber ? 'var(--color-error)' : 'var(--color-border)'}` }}
                 />
+                <InlineFieldError id="so-tracking-number-error" error={fulfillErrors.trackingNumber} />
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
-                  Courier Tracking URL (optional)
+                <label htmlFor="so-tracking-url" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
+                  Courier Tracking URL <span className="form-optional">(optional)</span>
                 </label>
                 <input
+                  id="so-tracking-url"
                   type="url"
+                  maxLength={300}
+                  aria-invalid={Boolean(fulfillErrors.trackingUrl)}
+                  aria-describedby={fulfillErrors.trackingUrl ? 'so-tracking-url-error' : undefined}
                   placeholder="https://track.courier.com/..."
                   value={trackingForm.trackingUrl}
-                  onChange={e => setTrackingForm({ ...trackingForm, trackingUrl: e.target.value })}
-                  style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                  onChange={e => {
+                    setTrackingForm({ ...trackingForm, trackingUrl: e.target.value });
+                    if (fulfillErrors.trackingUrl) setFulfillErrors(prev => ({ ...prev, trackingUrl: null }));
+                  }}
+                  onBlur={e => setFulfillErrors(prev => ({ ...prev, trackingUrl: validateOptionalUrl(e.target.value, 'Courier tracking URL').error }))}
+                  style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: `1px solid ${fulfillErrors.trackingUrl ? 'var(--color-error)' : 'var(--color-border)'}` }}
                 />
+                <InlineFieldError id="so-tracking-url-error" error={fulfillErrors.trackingUrl} />
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
-                  Fulfillment Notes (optional)
+                <label htmlFor="so-fulfill-notes" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
+                  Fulfillment Notes <span className="form-optional">(optional)</span>
                 </label>
                 <textarea
+                  id="so-fulfill-notes"
                   rows="2"
+                  maxLength={500}
+                  aria-invalid={Boolean(fulfillErrors.notes)}
+                  aria-describedby={fulfillErrors.notes ? 'so-fulfill-notes-error' : undefined}
                   placeholder="Dispatched via express delivery"
                   value={trackingForm.notes}
-                  onChange={e => setTrackingForm({ ...trackingForm, notes: e.target.value })}
-                  style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                  onChange={e => {
+                    setTrackingForm({ ...trackingForm, notes: e.target.value });
+                    if (fulfillErrors.notes) setFulfillErrors(prev => ({ ...prev, notes: null }));
+                  }}
+                  onBlur={e => setFulfillErrors(prev => ({ ...prev, notes: validateOptionalText(e.target.value, 'Fulfillment notes', { max: 500 }).error }))}
+                  style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: `1px solid ${fulfillErrors.notes ? 'var(--color-error)' : 'var(--color-border)'}` }}
                 />
+                <InlineFieldError id="so-fulfill-notes-error" error={fulfillErrors.notes} />
               </div>
 
               <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end', marginTop: 'var(--space-2)' }}>
-                <button type="button" className="btn btn-ghost" onClick={() => setFulfillModal({ open: false, orderId: null })}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Confirm Shipment</button>
+                <button type="button" className="btn btn-ghost" onClick={() => { setFulfillModal({ open: false, orderId: null }); setFulfillErrors({}); }}>Cancel</button>
+                <button type="submit" disabled={submitting} className="btn btn-primary">{submitting ? 'Submitting…' : 'Confirm Shipment'}</button>
               </div>
             </form>
           </div>
@@ -365,25 +443,35 @@ export default function SellerOrdersPage() {
               ⚠️ Cancelling will mark this slice cancelled and automatically restore variant stock to your warehouse inventory.
             </p>
 
-            <form onSubmit={handleCancel} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+            <form onSubmit={handleCancel} noValidate style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
               <div>
-                <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
-                  Cancellation Reason (Required)
+                <label htmlFor="so-cancel-reason" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
+                  Cancellation Reason *
                 </label>
                 <textarea
+                  id="so-cancel-reason"
                   rows="3"
                   required
+                  aria-required="true"
+                  maxLength={500}
+                  aria-invalid={Boolean(cancelError)}
+                  aria-describedby={cancelError ? 'so-cancel-reason-error' : undefined}
                   placeholder="e.g. Stock damage prior to dispatch, out of requested size"
                   value={cancelReason}
-                  onChange={e => setCancelReason(e.target.value)}
-                  style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                  onChange={e => {
+                    setCancelReason(e.target.value);
+                    if (cancelError) setCancelError(null);
+                  }}
+                  onBlur={e => setCancelError(validateRequiredText(e.target.value, 'Cancellation reason', { min: 3, max: 500 }).error)}
+                  style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: `1px solid ${cancelError ? 'var(--color-error)' : 'var(--color-border)'}` }}
                 />
+                <InlineFieldError id="so-cancel-reason-error" error={cancelError} />
               </div>
 
               <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end', marginTop: 'var(--space-2)' }}>
-                <button type="button" className="btn btn-ghost" onClick={() => setCancelModal({ open: false, orderId: null })}>Keep Order</button>
-                <button type="submit" className="btn btn-primary" style={{ background: 'var(--color-error)', borderColor: 'var(--color-error)' }}>
-                  Confirm Cancellation & Restore Stock
+                <button type="button" className="btn btn-ghost" onClick={() => { setCancelModal({ open: false, orderId: null }); setCancelError(null); }}>Keep Order</button>
+                <button type="submit" disabled={submitting} className="btn btn-primary" style={{ background: 'var(--color-error)', borderColor: 'var(--color-error)' }}>
+                  {submitting ? 'Cancelling…' : 'Confirm Cancellation & Restore Stock'}
                 </button>
               </div>
             </form>

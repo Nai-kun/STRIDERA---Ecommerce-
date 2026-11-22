@@ -2,9 +2,20 @@
 const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
+const psgcClient = require('../services/psgcClient');
 const { authenticate, optionalAuth } = require('../middleware/auth.middleware');
 const { createError } = require('../middleware/error.middleware');
-const { body, validationResult } = require('express-validator');
+const {
+  normalizePhMobile,
+  validateEmail,
+  validatePersonName,
+  validateStreet,
+  validateCityOrProvince,
+  validatePostalCode,
+  validateOptionalText,
+  collectFieldErrors,
+  sendValidationError
+} = require('../lib/validators');
 
 /**
  * Generate human-readable order number: STR-YYYYMMDD-XXXXX
@@ -17,61 +28,84 @@ function generateOrderNumber() {
 }
 
 // POST /api/orders — Create order from cart (checkout)
-router.post('/', [
-  optionalAuth,
-  body('shippingFullName')
-    .trim()
-    .notEmpty()
-    .withMessage('Full name required')
-    .matches(/^[A-Za-z\s\-'.]+$/)
-    .withMessage('Full name must contain only letters'),
-  body('shippingPhone')
-    .trim()
-    .notEmpty()
-    .withMessage('Phone required')
-    .matches(/^\+63 9\d{2}-\d{3}-\d{4}$/)
-    .withMessage('Mobile number must be in Philippine international format: +63 9XX-XXX-YYYY (e.g. +63 917-123-4567)'),
-  body('shippingAddressLine1').trim().notEmpty().withMessage('Address line 1 required'),
-  body('shippingCity').trim().notEmpty().withMessage('City required'),
-  body('shippingProvince').trim().notEmpty().withMessage('Province required'),
-  body('shippingPostalCode')
-    .trim()
-    .notEmpty()
-    .withMessage('Postal code required')
-    .matches(/^\d{4}$/)
-    .withMessage('Philippine postal code must be 4 digits (e.g. 1000, 1200)'),
-  body('guestEmail')
-    .optional()
-    .trim()
-    .isEmail()
-    .withMessage('Valid email required')
-    .custom(val => {
-      if (val && !val.toLowerCase().endsWith('@gmail.com')) {
-        throw new Error('Only @gmail.com email addresses are accepted');
-      }
-      return true;
-    }),
-  body('promotionCode').optional().trim(),
-  body('paymentMethod').optional().trim(),
-  body('notes').optional().trim()
-], async (req, res, next) => {
+router.post('/', optionalAuth, async (req, res, next) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ success: false, errors: errors.array() });
-    }
-
+    const bodyData = req.body || {};
     const userId = req.user?.id || null;
     const sessionId = req.cookies?.cart_session || req.headers['x-cart-session'] || null;
+
+    const collected = collectFieldErrors({
+      shippingFullName: validatePersonName(bodyData.shippingFullName, 'Full name'),
+      shippingPhone: normalizePhMobile(bodyData.shippingPhone, { required: true }),
+      shippingAddressLine1: validateStreet(bodyData.shippingAddressLine1),
+      shippingAddressLine2: validateOptionalText(bodyData.shippingAddressLine2, 'Address line 2', { max: 200 }),
+      shippingCity: validateCityOrProvince(bodyData.shippingCity, 'City'),
+      shippingProvince: validateCityOrProvince(bodyData.shippingProvince, 'Province'),
+      shippingPostalCode: validatePostalCode(bodyData.shippingPostalCode),
+      guestEmail: validateEmail(bodyData.guestEmail, { required: !userId, applyPolicy: !userId }),
+      notes: validateOptionalText(bodyData.notes, 'Delivery instructions', { max: 500 }),
+      promotionCode: validateOptionalText(bodyData.promotionCode, 'Promo code', { max: 40 })
+    });
+    if (!collected.ok) {
+      return sendValidationError(res, collected);
+    }
+
     const {
       shippingFullName, shippingPhone, shippingAddressLine1,
       shippingAddressLine2, shippingCity, shippingProvince,
-      shippingPostalCode, shippingCountry, guestEmail,
-      promotionCode, notes, paymentMethod = 'gcash'
-    } = req.body;
+      shippingPostalCode, guestEmail, notes, promotionCode
+    } = collected.values;
+    const {
+      shippingCountry, paymentMethod = 'gcash',
+      shippingRegion, shippingBarangay, shippingRegionCode,
+      shippingProvinceCode, shippingCityCode, shippingBarangayCode,
+      shippingAddressSource
+    } = bodyData;
 
-    if (!userId && !guestEmail) {
-      return res.status(400).json({ success: false, message: 'Email is required for guest checkout' });
+    let resolvedShippingCity = shippingCity;
+    let resolvedShippingProvince = shippingProvince;
+    let resolvedShippingRegion = shippingRegion || null;
+    let resolvedShippingBarangay = shippingBarangay || null;
+    let resolvedRegionCode = shippingRegionCode || null;
+    let resolvedProvinceCode = shippingProvinceCode || null;
+    let resolvedCityCode = shippingCityCode || null;
+    let resolvedBarangayCode = shippingBarangayCode || null;
+    let resolvedAddressSource = shippingAddressSource === 'MANUAL_FALLBACK' ? 'MANUAL_FALLBACK' : 'MANUAL';
+
+    const hasAnyPsgcCode = Boolean(
+      resolvedRegionCode || resolvedProvinceCode || resolvedCityCode || resolvedBarangayCode
+    );
+
+    if (hasAnyPsgcCode) {
+      let verified;
+      try {
+        verified = await psgcClient.validateAddressHierarchy({
+          regionCode: resolvedRegionCode,
+          provinceCode: resolvedProvinceCode,
+          cityCode: resolvedCityCode,
+          barangayCode: resolvedBarangayCode
+        });
+      } catch (psgcErr) {
+        if (psgcErr instanceof psgcClient.PsgcError || psgcErr?.name === 'PsgcError') {
+          return res.status(psgcErr.statusCode || 400).json({
+            success: false,
+            code: psgcErr.code || 'PSGC_ERROR',
+            message: psgcErr.message,
+            degraded: (psgcErr.statusCode || 500) >= 500
+          });
+        }
+        throw psgcErr;
+      }
+      // Overwrite browser-sent address names with canonical PSGC values
+      resolvedShippingRegion = verified.regionName;
+      resolvedShippingProvince = verified.provinceName;
+      resolvedShippingCity = verified.cityName;
+      resolvedShippingBarangay = verified.barangayName || resolvedShippingBarangay;
+      resolvedRegionCode = verified.regionCode;
+      resolvedProvinceCode = verified.provinceCode;
+      resolvedCityCode = verified.cityCode;
+      resolvedBarangayCode = verified.barangayCode;
+      resolvedAddressSource = 'PSGC_VERIFIED';
     }
 
     let cart;
@@ -193,8 +227,15 @@ router.post('/', [
           shippingPhone,
           shippingAddressLine1,
           shippingAddressLine2: shippingAddressLine2 || null,
-          shippingCity,
-          shippingProvince,
+          shippingBarangay: resolvedShippingBarangay,
+          shippingCity: resolvedShippingCity,
+          shippingProvince: resolvedShippingProvince,
+          shippingRegion: resolvedShippingRegion,
+          shippingRegionCode: resolvedRegionCode,
+          shippingProvinceCode: resolvedProvinceCode,
+          shippingCityCode: resolvedCityCode,
+          shippingBarangayCode: resolvedBarangayCode,
+          shippingAddressSource: resolvedAddressSource,
           shippingPostalCode,
           shippingCountry: shippingCountry || 'PH',
           promotionId,

@@ -454,10 +454,74 @@ input, select, textarea { font-family: inherit; }
   border-color: var(--color-brand-primary);
   box-shadow: 0 0 0 3px rgba(74,144,196,0.15);
 }
+.form-input[aria-invalid="true"],
+.form-select[aria-invalid="true"],
+.form-textarea[aria-invalid="true"] {
+  border-color: var(--color-error);
+  background: rgba(239,68,68,0.03);
+}
+.form-input[aria-invalid="true"]:focus,
+.form-select[aria-invalid="true"]:focus,
+.form-textarea[aria-invalid="true"]:focus {
+  box-shadow: 0 0 0 3px rgba(239,68,68,0.16);
+}
 .form-error {
   font-size: var(--text-xs);
   color: var(--color-error);
   margin-top: var(--space-1);
+}
+.form-field-error {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-xs);
+  color: var(--color-error);
+  margin-top: 4px;
+  font-weight: 500;
+}
+.form-optional {
+  color: var(--color-text-muted);
+  font-weight: 400;
+  font-size: var(--text-xs);
+}
+.password-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+.password-field-input {
+  padding-right: 44px;
+}
+.password-field-input::-ms-reveal,
+.password-field-input::-ms-clear {
+  display: none;
+}
+.password-toggle-btn {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+.password-toggle-btn:hover {
+  color: var(--color-text);
+  background: rgba(15, 23, 42, 0.05);
+}
+.password-toggle-btn:focus-visible {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: 1px;
 }
 
 /* ─── BADGE ─────────────────────────────────────────── */

@@ -10,6 +10,19 @@ import {
   failDeliveryShipment,
   logout
 } from '../../lib/api';
+import InlineFieldError from '../../components/InlineFieldError';
+import {
+  validatePersonName,
+  validateOptionalText,
+  validateRequiredText,
+  focusFirstInvalidField
+} from '../../lib/validation';
+
+const POD_FIELD_IDS = {
+  recipientName: 'del-pod-recipient',
+  proofOfDeliveryUrl: 'del-pod-proof',
+  notes: 'del-pod-notes'
+};
 
 export default function DeliveryPersonnelPortalPage() {
   const [shipments, setShipments] = useState([]);
@@ -25,6 +38,9 @@ export default function DeliveryPersonnelPortalPage() {
   // Failed Delivery Modal
   const [failModal, setFailModal] = useState({ open: false, shipment: null });
   const [failForm, setFailForm] = useState({ failureReason: 'Customer unreachable at delivery address', initiateReturn: false });
+  const [podErrors, setPodErrors] = useState({});
+  const [failError, setFailError] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const notify = (msg, isError = false) => {
     setNotification({ msg, isError });
@@ -89,29 +105,60 @@ export default function DeliveryPersonnelPortalPage() {
 
   const handlePodSubmit = async (e) => {
     e.preventDefault();
-    if (!podModal.shipment) return;
+    if (!podModal.shipment || submitting) return;
+
+    const recRes = validatePersonName(podForm.recipientName, 'Recipient name');
+    const podUrlRes = validateOptionalText(podForm.proofOfDeliveryUrl, 'Proof of delivery reference', { max: 300 });
+    const notesRes = validateOptionalText(podForm.notes, 'Delivery notes', { max: 500 });
+    const nextErrors = {
+      ...(recRes.valid ? {} : { recipientName: recRes.error }),
+      ...(podUrlRes.valid ? {} : { proofOfDeliveryUrl: podUrlRes.error }),
+      ...(notesRes.valid ? {} : { notes: notesRes.error })
+    };
+    setPodErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      focusFirstInvalidField(nextErrors, POD_FIELD_IDS);
+      return;
+    }
+
+    setSubmitting(true);
     try {
       const res = await updateDeliveryShipmentStatus(podModal.shipment.id, {
         status: 'DELIVERED',
-        recipientName: podForm.recipientName,
-        proofOfDeliveryUrl: podForm.proofOfDeliveryUrl || `POD-SIGNED-${Date.now()}`,
-        notes: podForm.notes || 'Package delivered and signed by recipient.'
+        recipientName: recRes.value,
+        proofOfDeliveryUrl: podUrlRes.value || `POD-SIGNED-${Date.now()}`,
+        notes: notesRes.value || 'Package delivered and signed by recipient.'
       });
       if (res.success) {
         notify('Shipment marked as DELIVERED with Proof of Delivery!');
         setPodModal({ open: false, shipment: null });
+        setPodErrors({});
         loadShipments();
       }
     } catch (err) {
       notify(err.message || 'Failed to complete delivery', true);
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleFailSubmit = async (e) => {
     e.preventDefault();
-    if (!failModal.shipment) return;
+    if (!failModal.shipment || submitting) return;
+
+    const reasonRes = validateRequiredText(failForm.failureReason, 'Failure reason', { min: 3, max: 500 });
+    if (!reasonRes.valid) {
+      setFailError(reasonRes.error);
+      document.getElementById('del-fail-reason')?.focus();
+      return;
+    }
+    setFailError(null);
+    setSubmitting(true);
     try {
-      const res = await failDeliveryShipment(failModal.shipment.id, failForm);
+      const res = await failDeliveryShipment(failModal.shipment.id, {
+        ...failForm,
+        failureReason: reasonRes.value
+      });
       if (res.success) {
         notify(failForm.initiateReturn ? 'Return to Seller initiated.' : 'Failed delivery attempt recorded.');
         setFailModal({ open: false, shipment: null });
@@ -119,6 +166,8 @@ export default function DeliveryPersonnelPortalPage() {
       }
     } catch (err) {
       notify(err.message || 'Failed to record delivery attempt', true);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -337,39 +386,66 @@ export default function DeliveryPersonnelPortalPage() {
             <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, marginBottom: 'var(--space-2)' }}>
               Confirm Delivery & Proof of Delivery (FR-7.9)
             </h2>
-            <form onSubmit={handlePodSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+            <form onSubmit={handlePodSubmit} noValidate style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
               <div>
-                <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Recipient Name</label>
+                <label htmlFor="del-pod-recipient" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Recipient Name *</label>
                 <input
+                  id="del-pod-recipient"
                   type="text"
                   required
+                  aria-required="true"
+                  maxLength={60}
+                  aria-invalid={Boolean(podErrors.recipientName)}
+                  aria-describedby={podErrors.recipientName ? 'del-pod-recipient-error' : undefined}
                   value={podForm.recipientName}
-                  onChange={e => setPodForm({ ...podForm, recipientName: e.target.value })}
-                  style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                  onChange={e => {
+                    setPodForm({ ...podForm, recipientName: e.target.value });
+                    if (podErrors.recipientName) setPodErrors(prev => ({ ...prev, recipientName: null }));
+                  }}
+                  onBlur={e => setPodErrors(prev => ({ ...prev, recipientName: validatePersonName(e.target.value, 'Recipient name').error }))}
+                  style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: `1px solid ${podErrors.recipientName ? 'var(--color-error)' : 'var(--color-border)'}` }}
                 />
+                <InlineFieldError id="del-pod-recipient-error" error={podErrors.recipientName} />
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Proof of Delivery Reference / Photo URL</label>
+                <label htmlFor="del-pod-proof" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Proof of Delivery Reference / Photo URL <span className="form-optional">(optional)</span></label>
                 <input
+                  id="del-pod-proof"
                   type="text"
-                  required
+                  maxLength={300}
+                  aria-invalid={Boolean(podErrors.proofOfDeliveryUrl)}
+                  aria-describedby={podErrors.proofOfDeliveryUrl ? 'del-pod-proof-error' : undefined}
                   value={podForm.proofOfDeliveryUrl}
-                  onChange={e => setPodForm({ ...podForm, proofOfDeliveryUrl: e.target.value })}
-                  style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                  onChange={e => {
+                    setPodForm({ ...podForm, proofOfDeliveryUrl: e.target.value });
+                    if (podErrors.proofOfDeliveryUrl) setPodErrors(prev => ({ ...prev, proofOfDeliveryUrl: null }));
+                  }}
+                  onBlur={e => setPodErrors(prev => ({ ...prev, proofOfDeliveryUrl: validateOptionalText(e.target.value, 'Proof of delivery reference', { max: 300 }).error }))}
+                  style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: `1px solid ${podErrors.proofOfDeliveryUrl ? 'var(--color-error)' : 'var(--color-border)'}` }}
                 />
+                <InlineFieldError id="del-pod-proof-error" error={podErrors.proofOfDeliveryUrl} />
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Delivery Notes</label>
+                <label htmlFor="del-pod-notes" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Delivery Notes <span className="form-optional">(optional)</span></label>
                 <textarea
+                  id="del-pod-notes"
                   rows="2"
+                  maxLength={500}
+                  aria-invalid={Boolean(podErrors.notes)}
+                  aria-describedby={podErrors.notes ? 'del-pod-notes-error' : undefined}
                   value={podForm.notes}
-                  onChange={e => setPodForm({ ...podForm, notes: e.target.value })}
-                  style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                  onChange={e => {
+                    setPodForm({ ...podForm, notes: e.target.value });
+                    if (podErrors.notes) setPodErrors(prev => ({ ...prev, notes: null }));
+                  }}
+                  onBlur={e => setPodErrors(prev => ({ ...prev, notes: validateOptionalText(e.target.value, 'Delivery notes', { max: 500 }).error }))}
+                  style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: `1px solid ${podErrors.notes ? 'var(--color-error)' : 'var(--color-border)'}` }}
                 />
+                <InlineFieldError id="del-pod-notes-error" error={podErrors.notes} />
               </div>
               <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end' }}>
-                <button type="button" className="btn btn-ghost" onClick={() => setPodModal({ open: false, shipment: null })}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Complete Delivery</button>
+                <button type="button" className="btn btn-ghost" onClick={() => { setPodModal({ open: false, shipment: null }); setPodErrors({}); }}>Cancel</button>
+                <button type="submit" disabled={submitting} className="btn btn-primary">{submitting ? 'Completing…' : 'Complete Delivery'}</button>
               </div>
             </form>
           </div>
@@ -386,16 +462,26 @@ export default function DeliveryPersonnelPortalPage() {
             <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, color: 'var(--color-error)', marginBottom: 'var(--space-2)' }}>
               Record Failed Delivery Attempt (FR-7.10)
             </h2>
-            <form onSubmit={handleFailSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+            <form onSubmit={handleFailSubmit} noValidate style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
               <div>
-                <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Failure Reason</label>
+                <label htmlFor="del-fail-reason" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Failure Reason *</label>
                 <textarea
+                  id="del-fail-reason"
                   rows="3"
                   required
+                  aria-required="true"
+                  maxLength={500}
+                  aria-invalid={Boolean(failError)}
+                  aria-describedby={failError ? 'del-fail-reason-error' : undefined}
                   value={failForm.failureReason}
-                  onChange={e => setFailForm({ ...failForm, failureReason: e.target.value })}
-                  style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                  onChange={e => {
+                    setFailForm({ ...failForm, failureReason: e.target.value });
+                    if (failError) setFailError(null);
+                  }}
+                  onBlur={e => setFailError(validateRequiredText(e.target.value, 'Failure reason', { min: 3, max: 500 }).error)}
+                  style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: `1px solid ${failError ? 'var(--color-error)' : 'var(--color-border)'}` }}
                 />
+                <InlineFieldError id="del-fail-reason-error" error={failError} />
               </div>
               <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--text-sm)' }}>
                 <input
@@ -406,9 +492,9 @@ export default function DeliveryPersonnelPortalPage() {
                 Initiate Return-to-Seller (max attempts reached / refused)
               </label>
               <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end' }}>
-                <button type="button" className="btn btn-ghost" onClick={() => setFailModal({ open: false, shipment: null })}>Cancel</button>
-                <button type="submit" className="btn btn-primary" style={{ background: 'var(--color-error)', borderColor: 'var(--color-error)' }}>
-                  Submit Report
+                <button type="button" className="btn btn-ghost" onClick={() => { setFailModal({ open: false, shipment: null }); setFailError(null); }}>Cancel</button>
+                <button type="submit" disabled={submitting} className="btn btn-primary" style={{ background: 'var(--color-error)', borderColor: 'var(--color-error)' }}>
+                  {submitting ? 'Submitting…' : 'Submit Report'}
                 </button>
               </div>
             </form>

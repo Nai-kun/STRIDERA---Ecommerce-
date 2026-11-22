@@ -39,7 +39,7 @@ function deriveCanonicalOrderStatus(order, items = []) {
  */
 async function finalizePayment({
   orderId,
-  provider = 'paymongo_sandbox',
+  provider = 'ewallet_sandbox',
   referenceNumber = null,
   paymentMethod = 'gcash',
   actorId = null,

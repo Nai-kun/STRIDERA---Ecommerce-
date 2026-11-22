@@ -26,6 +26,27 @@ import {
   simulatePayment,
   logout
 } from '../../../lib/api';
+import InlineFieldError from '../../../components/InlineFieldError';
+import PasswordInput from '../../../components/PasswordInput';
+import {
+  validateEntityName,
+  validateSlug,
+  validateOptionalText,
+  validateRequiredText,
+  focusFirstInvalidField
+} from '../../../lib/validation';
+
+const BRAND_FIELD_IDS = {
+  name: 'admin-brand-name',
+  slug: 'admin-brand-slug',
+  description: 'admin-brand-description'
+};
+
+const PLATFORM_CONFIG_FIELD_IDS = {
+  platformFeePercent: 'admin-cfg-fee',
+  lowStockThreshold: 'admin-cfg-stock',
+  enabledWallets: 'admin-cfg-wallets'
+};
 
 const ALL_ROLES = [
   'CUSTOMER',
@@ -67,6 +88,10 @@ export default function AdminDashboardPage() {
   // Brand modal
   const [showBrandModal, setShowBrandModal] = useState(false);
   const [newBrand, setNewBrand] = useState({ name: '', slug: '', description: '' });
+  const [brandErrors, setBrandErrors] = useState({});
+  const [configErrors, setConfigErrors] = useState({});
+  const [savingBrand, setSavingBrand] = useState(false);
+  const [savingConfig, setSavingConfig] = useState(false);
 
   const notify = (msg, isError = false) => {
     setNotification({ msg, isError });
@@ -165,31 +190,112 @@ export default function AdminDashboardPage() {
     }
   };
 
+  const validateBrandField = (field, val) => {
+    if (field === 'name') return validateEntityName(val, 'Brand name', { min: 2, max: 80 }).error;
+    if (field === 'slug') return validateSlug(val).error;
+    if (field === 'description') return validateOptionalText(val, 'Description', { max: 1000 }).error;
+    return null;
+  };
+
   const handleCreateBrand = async (e) => {
     e.preventDefault();
+    if (savingBrand) return;
+
+    const nameRes = validateEntityName(newBrand.name, 'Brand name', { min: 2, max: 80 });
+    const slugRes = validateSlug(newBrand.slug);
+    const descRes = validateOptionalText(newBrand.description, 'Description', { max: 1000 });
+
+    const nextErrors = {
+      ...(nameRes.valid ? {} : { name: nameRes.error }),
+      ...(slugRes.valid ? {} : { slug: slugRes.error }),
+      ...(descRes.valid ? {} : { description: descRes.error })
+    };
+    setBrandErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      focusFirstInvalidField(nextErrors, BRAND_FIELD_IDS);
+      return;
+    }
+
+    setSavingBrand(true);
     try {
-      const res = await createAdminBrand(newBrand);
+      const res = await createAdminBrand({
+        name: nameRes.value,
+        slug: slugRes.value,
+        description: descRes.value || ''
+      });
       if (res.success) {
         notify('Brand created successfully!');
         setShowBrandModal(false);
+        setBrandErrors({});
         setNewBrand({ name: '', slug: '', description: '' });
         loadAll();
       }
     } catch (e) {
+      if (e.fieldErrors) setBrandErrors(e.fieldErrors);
       notify(e.message || 'Brand creation failed', true);
+    } finally {
+      setSavingBrand(false);
     }
+  };
+
+  const validatePlatformField = (field, val) => {
+    if (field === 'platformFeePercent') {
+      const str = String(val ?? '').trim();
+      if (!/^\d+$/.test(str) || Number(str) < 0 || Number(str) > 50) {
+        return 'Platform commission must be a whole number from 0 to 50.';
+      }
+      return null;
+    }
+    if (field === 'lowStockThreshold') {
+      const str = String(val ?? '').trim();
+      if (!/^\d+$/.test(str) || Number(str) < 1 || Number(str) > 100) {
+        return 'Low-stock threshold must be a whole number from 1 to 100.';
+      }
+      return null;
+    }
+    if (field === 'enabledWallets') {
+      return validateRequiredText(val, 'Enabled e-wallets', { min: 2, max: 120 }).error;
+    }
+    return null;
   };
 
   const handleSavePlatformConfig = async (e) => {
     e.preventDefault();
+    if (savingConfig) return;
+
+    const feeErr = validatePlatformField('platformFeePercent', platformConfig.platformFeePercent);
+    const stockErr = validatePlatformField('lowStockThreshold', platformConfig.lowStockThreshold);
+    const walletsCheck = validateRequiredText(platformConfig.enabledWallets, 'Enabled e-wallets', { min: 2, max: 120 });
+
+    const nextErrors = {
+      ...(feeErr ? { platformFeePercent: feeErr } : {}),
+      ...(stockErr ? { lowStockThreshold: stockErr } : {}),
+      ...(walletsCheck.valid ? {} : { enabledWallets: walletsCheck.error })
+    };
+    setConfigErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      focusFirstInvalidField(nextErrors, PLATFORM_CONFIG_FIELD_IDS);
+      return;
+    }
+
+    setSavingConfig(true);
     try {
-      const res = await updateAdminPlatformConfig(platformConfig);
+      const res = await updateAdminPlatformConfig({
+        ...platformConfig,
+        platformFeePercent: Number(platformConfig.platformFeePercent),
+        lowStockThreshold: Number(platformConfig.lowStockThreshold),
+        enabledWallets: walletsCheck.value
+      });
       if (res.success) {
         notify('Platform configuration saved!');
+        setConfigErrors({});
         setPlatformConfig(res.data);
       }
     } catch (e) {
+      if (e.fieldErrors) setConfigErrors(e.fieldErrors);
       notify(e.message || 'Failed to save platform settings', true);
+    } finally {
+      setSavingConfig(false);
     }
   };
 
@@ -719,41 +825,72 @@ export default function AdminDashboardPage() {
                     Configure marketplace commission percentage, low-stock threshold, shipping fees, and active e-wallet providers.
                   </p>
 
-                  <form onSubmit={handleSavePlatformConfig} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 'var(--space-4)' }}>
+                  <form onSubmit={handleSavePlatformConfig} noValidate style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 'var(--space-4)' }}>
                     <div>
-                      <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 700, marginBottom: '4px' }}>Platform Commission (%)</label>
+                      <label htmlFor="admin-cfg-fee" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 700, marginBottom: '4px' }}>Platform Commission (%) *</label>
                       <input
+                        id="admin-cfg-fee"
                         type="number"
                         min="0"
                         max="50"
+                        required
+                        aria-required="true"
+                        aria-invalid={Boolean(configErrors.platformFeePercent)}
+                        aria-describedby={configErrors.platformFeePercent ? 'admin-cfg-fee-error' : undefined}
                         value={platformConfig.platformFeePercent}
-                        onChange={e => setPlatformConfig({ ...platformConfig, platformFeePercent: Number(e.target.value) })}
-                        style={{ width: '100%', padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                        onChange={e => {
+                          setPlatformConfig({ ...platformConfig, platformFeePercent: e.target.value });
+                          if (configErrors.platformFeePercent) setConfigErrors(prev => ({ ...prev, platformFeePercent: null }));
+                        }}
+                        onBlur={e => setConfigErrors(prev => ({ ...prev, platformFeePercent: validatePlatformField('platformFeePercent', e.target.value) }))}
+                        style={{ width: '100%', padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius-md)', border: `1px solid ${configErrors.platformFeePercent ? 'var(--color-error)' : 'var(--color-border)'}` }}
                       />
+                      <InlineFieldError id="admin-cfg-fee-error" error={configErrors.platformFeePercent} />
                     </div>
                     <div>
-                      <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 700, marginBottom: '4px' }}>Low-Stock Alert Threshold</label>
+                      <label htmlFor="admin-cfg-stock" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 700, marginBottom: '4px' }}>Low-Stock Alert Threshold *</label>
                       <input
+                        id="admin-cfg-stock"
                         type="number"
                         min="1"
                         max="100"
+                        required
+                        aria-required="true"
+                        aria-invalid={Boolean(configErrors.lowStockThreshold)}
+                        aria-describedby={configErrors.lowStockThreshold ? 'admin-cfg-stock-error' : undefined}
                         value={platformConfig.lowStockThreshold}
-                        onChange={e => setPlatformConfig({ ...platformConfig, lowStockThreshold: Number(e.target.value) })}
-                        style={{ width: '100%', padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                        onChange={e => {
+                          setPlatformConfig({ ...platformConfig, lowStockThreshold: e.target.value });
+                          if (configErrors.lowStockThreshold) setConfigErrors(prev => ({ ...prev, lowStockThreshold: null }));
+                        }}
+                        onBlur={e => setConfigErrors(prev => ({ ...prev, lowStockThreshold: validatePlatformField('lowStockThreshold', e.target.value) }))}
+                        style={{ width: '100%', padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius-md)', border: `1px solid ${configErrors.lowStockThreshold ? 'var(--color-error)' : 'var(--color-border)'}` }}
                       />
+                      <InlineFieldError id="admin-cfg-stock-error" error={configErrors.lowStockThreshold} />
                     </div>
                     <div>
-                      <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 700, marginBottom: '4px' }}>Enabled E-Wallets</label>
+                      <label htmlFor="admin-cfg-wallets" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 700, marginBottom: '4px' }}>Enabled E-Wallets *</label>
                       <input
+                        id="admin-cfg-wallets"
                         type="text"
+                        required
+                        aria-required="true"
+                        maxLength={120}
+                        aria-invalid={Boolean(configErrors.enabledWallets)}
+                        aria-describedby={configErrors.enabledWallets ? 'admin-cfg-wallets-error' : undefined}
                         value={platformConfig.enabledWallets}
-                        onChange={e => setPlatformConfig({ ...platformConfig, enabledWallets: e.target.value })}
-                        style={{ width: '100%', padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                        onChange={e => {
+                          setPlatformConfig({ ...platformConfig, enabledWallets: e.target.value });
+                          if (configErrors.enabledWallets) setConfigErrors(prev => ({ ...prev, enabledWallets: null }));
+                        }}
+                        onBlur={e => setConfigErrors(prev => ({ ...prev, enabledWallets: validatePlatformField('enabledWallets', e.target.value) }))}
+                        style={{ width: '100%', padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius-md)', border: `1px solid ${configErrors.enabledWallets ? 'var(--color-error)' : 'var(--color-border)'}` }}
                       />
+                      <InlineFieldError id="admin-cfg-wallets-error" error={configErrors.enabledWallets} />
                     </div>
                     <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-                      <button type="submit" className="btn btn-primary btn-sm" style={{ width: '100%', padding: 'var(--space-3)' }}>
-                        Save Platform Settings
+                      <button type="submit" disabled={savingConfig} className="btn btn-primary btn-sm" style={{ width: '100%', padding: 'var(--space-3)' }}>
+                        {savingConfig ? 'Saving…' : 'Save Platform Settings'}
                       </button>
                     </div>
                   </form>
@@ -1008,6 +1145,17 @@ export default function AdminDashboardPage() {
                       <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>DEMO FALLBACK</div>
                       <div style={{ fontWeight: 700 }}>{health?.demoFallbackEnabled ? 'Enabled' : 'Disabled'}</div>
                     </div>
+                    <div style={{ padding: 'var(--space-4)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
+                      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>PSGC PHILIPPINE ADDRESS API</div>
+                      <div style={{ fontWeight: 700, color: health?.psgcHealth?.reachable ? '#166534' : '#B91C1C' }}>
+                        {health?.psgcHealth?.reachable
+                          ? `Reachable (${health.psgcHealth.httpStatus || 200}, ${health.psgcHealth.latencyMs} ms • ${health.psgcHealth.regionCount || 0} regions)`
+                          : 'Unreachable'}
+                      </div>
+                      <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: 2 }}>
+                        {health?.psgcHealth?.host || 'psgc.gitlab.io'} • Cache: {health?.psgcHealth?.cache?.entries ?? 0} entries ({health?.psgcHealth?.cache?.hits ?? 0} hits)
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -1036,9 +1184,9 @@ export default function AdminDashboardPage() {
                         <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 4 }}>
                           {k} <span style={{ color: 'var(--color-text-muted)' }}>({apiSettings?.settings?.[k]?.masked || 'unset'})</span>
                         </label>
-                        <input
-                          type="password"
+                        <PasswordInput
                           className="form-input"
+                          toggleLabel="key"
                           placeholder="Enter new sandbox key..."
                           value={apiKeyForm[k]}
                           onChange={e => setApiKeyForm(p => ({ ...p, [k]: e.target.value }))}
@@ -1103,44 +1251,76 @@ export default function AdminDashboardPage() {
             width: '100%'
           }}>
             <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, marginBottom: 'var(--space-4)' }}>Create New Footwear Brand</h2>
-            <form onSubmit={handleCreateBrand} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+            <form onSubmit={handleCreateBrand} noValidate style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
               <div>
-                <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Brand Name</label>
+                <label htmlFor="admin-brand-name" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Brand Name *</label>
                 <input
+                  id="admin-brand-name"
                   type="text"
                   required
+                  aria-required="true"
+                  maxLength={80}
+                  aria-invalid={Boolean(brandErrors.name)}
+                  aria-describedby={brandErrors.name ? 'admin-brand-name-error' : undefined}
                   placeholder="e.g. Apex Athletics"
                   value={newBrand.name}
-                  onChange={e => setNewBrand({ ...newBrand, name: e.target.value, slug: e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-') })}
-                  style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                  onChange={e => {
+                    const nameVal = e.target.value;
+                    const nextSlug = nameVal.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+                    setNewBrand({ ...newBrand, name: nameVal, slug: nextSlug });
+                    if (brandErrors.name || brandErrors.slug) setBrandErrors(prev => ({ ...prev, name: null, slug: null }));
+                  }}
+                  onBlur={e => setBrandErrors(prev => ({ ...prev, name: validateBrandField('name', e.target.value) }))}
+                  style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: `1px solid ${brandErrors.name ? 'var(--color-error)' : 'var(--color-border)'}` }}
                 />
+                <InlineFieldError id="admin-brand-name-error" error={brandErrors.name} />
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Brand Slug</label>
+                <label htmlFor="admin-brand-slug" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Brand Slug *</label>
                 <input
+                  id="admin-brand-slug"
                   type="text"
                   required
+                  aria-required="true"
+                  maxLength={80}
+                  aria-invalid={Boolean(brandErrors.slug)}
+                  aria-describedby={brandErrors.slug ? 'admin-brand-slug-error' : undefined}
+                  placeholder="e.g. apex-athletics"
                   value={newBrand.slug}
-                  onChange={e => setNewBrand({ ...newBrand, slug: e.target.value })}
-                  style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                  onChange={e => {
+                    setNewBrand({ ...newBrand, slug: e.target.value });
+                    if (brandErrors.slug) setBrandErrors(prev => ({ ...prev, slug: null }));
+                  }}
+                  onBlur={e => setBrandErrors(prev => ({ ...prev, slug: validateBrandField('slug', e.target.value) }))}
+                  style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: `1px solid ${brandErrors.slug ? 'var(--color-error)' : 'var(--color-border)'}` }}
                 />
+                <InlineFieldError id="admin-brand-slug-error" error={brandErrors.slug} />
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Description</label>
+                <label htmlFor="admin-brand-description" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Description <span className="form-optional">(optional)</span></label>
                 <textarea
+                  id="admin-brand-description"
                   rows="3"
+                  maxLength={1000}
+                  aria-invalid={Boolean(brandErrors.description)}
+                  aria-describedby={brandErrors.description ? 'admin-brand-description-error' : undefined}
                   placeholder="High-performance marathon and distance running footwear..."
                   value={newBrand.description}
-                  onChange={e => setNewBrand({ ...newBrand, description: e.target.value })}
-                  style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+                  onChange={e => {
+                    setNewBrand({ ...newBrand, description: e.target.value });
+                    if (brandErrors.description) setBrandErrors(prev => ({ ...prev, description: null }));
+                  }}
+                  onBlur={e => setBrandErrors(prev => ({ ...prev, description: validateBrandField('description', e.target.value) }))}
+                  style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', border: `1px solid ${brandErrors.description ? 'var(--color-error)' : 'var(--color-border)'}` }}
                 />
+                <InlineFieldError id="admin-brand-description-error" error={brandErrors.description} />
               </div>
 
               <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end', marginTop: 'var(--space-2)' }}>
-                <button type="button" className="btn btn-ghost" onClick={() => setShowBrandModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Save Brand</button>
+                <button type="button" className="btn btn-ghost" onClick={() => { setShowBrandModal(false); setBrandErrors({}); }}>Cancel</button>
+                <button type="submit" disabled={savingBrand} className="btn btn-primary">{savingBrand ? 'Saving…' : 'Save Brand'}</button>
               </div>
             </form>
           </div>

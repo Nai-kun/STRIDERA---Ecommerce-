@@ -5,7 +5,23 @@ const prisma = require('../lib/prisma');
 const { authenticate, isAdmin } = require('../middleware/auth.middleware');
 const { createError } = require('../middleware/error.middleware');
 const { encryptSetting, decryptSetting, maskSecret: maskApiSecret, assertSandboxKey } = require('../lib/cryptoSettings');
+const psgcClient = require('../services/psgcClient');
 const { body, param, query, validationResult } = require('express-validator');
+const {
+  ALLOWED_AUDIENCES,
+  ALLOWED_SHOE_TYPES,
+  validateEntityName,
+  validateSku,
+  validateSlug,
+  validatePriceCentavos,
+  validateOptionalText,
+  validateRequiredText,
+  validateShoeSize,
+  validateColor,
+  validateStock,
+  collectFieldErrors,
+  sendValidationError
+} = require('../lib/validators');
 
 // All admin routes require authentication + admin role
 router.use(authenticate, isAdmin);
@@ -76,21 +92,35 @@ router.get('/products/:id', async (req, res, next) => {
 
 // POST /api/admin/products — Create product
 router.post('/products', [
-  body('name').trim().notEmpty(),
-  body('sku').trim().notEmpty(),
-  body('categoryId').isUUID(),
-  body('basePriceCentavos').isInt({ min: 0 }),
-  body('audience').isIn(['MEN', 'WOMEN', 'UNISEX']),
-  body('shoeType').isIn(['RUNNING', 'LIFESTYLE', 'BASKETBALL', 'TRAINING', 'CASUAL', 'BOOTS', 'FORMAL', 'LOAFERS'])
+  body('categoryId').isUUID().withMessage('Valid category ID required')
 ], async (req, res, next) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
 
-    const {
-      name, sku, categoryId, description, features, basePriceCentavos,
-      compareAtPriceCentavos, audience, shoeType, isFeatured
-    } = req.body;
+    const b = req.body || {};
+    const collected = collectFieldErrors({
+      name: validateEntityName(b.name, 'Product name', { min: 2, max: 80 }),
+      sku: validateSku(b.sku, 'SKU'),
+      basePriceCentavos: validatePriceCentavos(b.basePriceCentavos, { required: true, label: 'Base price' }),
+      compareAtPriceCentavos: validatePriceCentavos(b.compareAtPriceCentavos, { required: false, label: 'Compare at price' }),
+      description: validateOptionalText(b.description, 'Description', { max: 2000 }),
+      features: validateOptionalText(b.features, 'Features', { max: 1000 })
+    });
+    if (!ALLOWED_AUDIENCES.includes(b.audience)) {
+      collected.fieldErrors.audience = 'Valid audience required (MEN, WOMEN, UNISEX).';
+      collected.ok = false;
+      collected.firstError = collected.firstError || collected.fieldErrors.audience;
+    }
+    if (!ALLOWED_SHOE_TYPES.includes(b.shoeType)) {
+      collected.fieldErrors.shoeType = 'Valid shoe type required.';
+      collected.ok = false;
+      collected.firstError = collected.firstError || collected.fieldErrors.shoeType;
+    }
+    if (!collected.ok) return sendValidationError(res, collected);
+
+    const { categoryId, audience, shoeType, isFeatured } = b;
+    const { name, sku, basePriceCentavos, compareAtPriceCentavos, description, features } = collected.values;
 
     // Auto-generate slug from name
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') + '-' + Date.now();
@@ -124,10 +154,32 @@ router.put('/products/:id', async (req, res, next) => {
     const product = await prisma.product.findUnique({ where: { id: req.params.id } });
     if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
 
-    const {
-      name, categoryId, description, features, basePriceCentavos,
-      compareAtPriceCentavos, audience, shoeType, isFeatured, isActive
-    } = req.body;
+    const b = req.body || {};
+    const collected = collectFieldErrors({
+      ...(b.name !== undefined ? { name: validateEntityName(b.name, 'Product name', { min: 2, max: 80 }) } : {}),
+      ...(b.basePriceCentavos !== undefined ? { basePriceCentavos: validatePriceCentavos(b.basePriceCentavos, { required: true, label: 'Base price' }) } : {}),
+      ...(b.compareAtPriceCentavos !== undefined ? { compareAtPriceCentavos: validatePriceCentavos(b.compareAtPriceCentavos, { required: false, label: 'Compare at price' }) } : {}),
+      ...(b.description !== undefined ? { description: validateOptionalText(b.description, 'Description', { max: 2000 }) } : {}),
+      ...(b.features !== undefined ? { features: validateOptionalText(b.features, 'Features', { max: 1000 }) } : {})
+    });
+    if (b.audience !== undefined && !ALLOWED_AUDIENCES.includes(b.audience)) {
+      collected.fieldErrors.audience = 'Valid audience required.';
+      collected.ok = false;
+      collected.firstError = collected.firstError || collected.fieldErrors.audience;
+    }
+    if (b.shoeType !== undefined && !ALLOWED_SHOE_TYPES.includes(b.shoeType)) {
+      collected.fieldErrors.shoeType = 'Valid shoe type required.';
+      collected.ok = false;
+      collected.firstError = collected.firstError || collected.fieldErrors.shoeType;
+    }
+    if (!collected.ok) return sendValidationError(res, collected);
+
+    const { categoryId, audience, shoeType, isFeatured, isActive } = b;
+    const name = collected.values.name;
+    const description = collected.values.description;
+    const features = collected.values.features;
+    const basePriceCentavos = collected.values.basePriceCentavos;
+    const compareAtPriceCentavos = collected.values.compareAtPriceCentavos;
 
     const oldValues = { name: product.name, basePriceCentavos: product.basePriceCentavos, isActive: product.isActive };
 
@@ -181,17 +233,20 @@ router.delete('/products/:id', async (req, res, next) => {
 // ────────────────────────────────────────────────
 
 // POST /api/admin/products/:id/variants — Add variant
-router.post('/products/:id/variants', [
-  body('variantSku').trim().notEmpty(),
-  body('size').trim().notEmpty(),
-  body('color').trim().notEmpty(),
-  body('stockQuantity').isInt({ min: 0 })
-], async (req, res, next) => {
+router.post('/products/:id/variants', async (req, res, next) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
+    const b = req.body || {};
+    const collected = collectFieldErrors({
+      variantSku: validateSku(b.variantSku, 'Variant SKU'),
+      size: validateShoeSize(b.size),
+      color: validateColor(b.color),
+      stockQuantity: validateStock(b.stockQuantity),
+      priceOverrideCentavos: validatePriceCentavos(b.priceOverrideCentavos, { required: false, label: 'Price override' })
+    });
+    if (!collected.ok) return sendValidationError(res, collected);
 
-    const { variantSku, size, color, colorHex, priceOverrideCentavos, stockQuantity } = req.body;
+    const { colorHex } = b;
+    const { variantSku, size, color, stockQuantity, priceOverrideCentavos } = collected.values;
 
     const variant = await prisma.productVariant.create({
       data: {
@@ -737,15 +792,18 @@ router.get('/brands', async (req, res, next) => {
 });
 
 // POST /api/admin/brands
-router.post('/brands', [
-  body('name').trim().notEmpty().withMessage('Brand name required'),
-  body('slug').trim().notEmpty().withMessage('Slug required')
-], async (req, res, next) => {
+router.post('/brands', async (req, res, next) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
+    const b = req.body || {};
+    const collected = collectFieldErrors({
+      name: validateEntityName(b.name, 'Brand name', { min: 2, max: 80 }),
+      slug: validateSlug(b.slug),
+      description: validateOptionalText(b.description, 'Description', { max: 1000 })
+    });
+    if (!collected.ok) return sendValidationError(res, collected);
 
-    const { name, slug, description, logoUrl, sellerId } = req.body;
+    const { logoUrl, sellerId } = b;
+    const { name, slug, description } = collected.values;
 
     const brand = await prisma.brand.create({
       data: {
@@ -1069,6 +1127,7 @@ router.get('/platform-config', async (req, res, next) => {
 // PUT /api/admin/platform-config — Update platform configuration settings (FR-10.9)
 router.put('/platform-config', async (req, res, next) => {
   try {
+    const b = req.body || {};
     const {
       platformFeePercent,
       lowStockThreshold,
@@ -1076,25 +1135,61 @@ router.put('/platform-config', async (req, res, next) => {
       freeShippingThresholdCentavos,
       enabledWallets,
       sandboxMode
-    } = req.body;
+    } = b;
+
+    const checks = {};
+    if (platformFeePercent !== undefined) {
+      const feeNum = Number(platformFeePercent);
+      checks.platformFeePercent =
+        Number.isInteger(feeNum) && feeNum >= 0 && feeNum <= 50
+          ? { valid: true, value: feeNum, error: null }
+          : { valid: false, value: null, error: 'Platform commission must be a whole number from 0 to 50.' };
+    }
+    if (lowStockThreshold !== undefined) {
+      const threshNum = Number(lowStockThreshold);
+      checks.lowStockThreshold =
+        Number.isInteger(threshNum) && threshNum >= 1 && threshNum <= 100
+          ? { valid: true, value: threshNum, error: null }
+          : { valid: false, value: null, error: 'Low-stock threshold must be a whole number from 1 to 100.' };
+    }
+    if (shippingFeeCentavos !== undefined) {
+      const shipNum = Number(shippingFeeCentavos);
+      checks.shippingFeeCentavos =
+        Number.isInteger(shipNum) && shipNum >= 0
+          ? { valid: true, value: shipNum, error: null }
+          : { valid: false, value: null, error: 'Shipping fee must be 0 or greater.' };
+    }
+    if (freeShippingThresholdCentavos !== undefined) {
+      const freeNum = Number(freeShippingThresholdCentavos);
+      checks.freeShippingThresholdCentavos =
+        Number.isInteger(freeNum) && freeNum >= 0
+          ? { valid: true, value: freeNum, error: null }
+          : { valid: false, value: null, error: 'Free shipping threshold must be 0 or greater.' };
+    }
+    if (enabledWallets !== undefined) {
+      checks.enabledWallets = validateRequiredText(enabledWallets, 'Enabled e-wallets', { min: 2, max: 120 });
+    }
+
+    const collected = collectFieldErrors(checks);
+    if (!collected.ok) return sendValidationError(res, collected);
 
     const updated = await prisma.platformConfig.upsert({
       where: { id: 'default' },
       update: {
-        ...(platformFeePercent !== undefined && { platformFeePercent: Math.max(0, Math.min(50, parseInt(platformFeePercent))) }),
-        ...(lowStockThreshold !== undefined && { lowStockThreshold: Math.max(1, parseInt(lowStockThreshold)) }),
-        ...(shippingFeeCentavos !== undefined && { shippingFeeCentavos: Math.max(0, parseInt(shippingFeeCentavos)) }),
-        ...(freeShippingThresholdCentavos !== undefined && { freeShippingThresholdCentavos: Math.max(0, parseInt(freeShippingThresholdCentavos)) }),
-        ...(enabledWallets !== undefined && { enabledWallets: String(enabledWallets) }),
+        ...(collected.values.platformFeePercent !== undefined && { platformFeePercent: collected.values.platformFeePercent }),
+        ...(collected.values.lowStockThreshold !== undefined && { lowStockThreshold: collected.values.lowStockThreshold }),
+        ...(collected.values.shippingFeeCentavos !== undefined && { shippingFeeCentavos: collected.values.shippingFeeCentavos }),
+        ...(collected.values.freeShippingThresholdCentavos !== undefined && { freeShippingThresholdCentavos: collected.values.freeShippingThresholdCentavos }),
+        ...(collected.values.enabledWallets !== undefined && { enabledWallets: collected.values.enabledWallets }),
         ...(sandboxMode !== undefined && { sandboxMode: Boolean(sandboxMode) })
       },
       create: {
         id: 'default',
-        platformFeePercent: platformFeePercent !== undefined ? parseInt(platformFeePercent) : 5,
-        lowStockThreshold: lowStockThreshold !== undefined ? parseInt(lowStockThreshold) : 5,
-        shippingFeeCentavos: shippingFeeCentavos !== undefined ? parseInt(shippingFeeCentavos) : 15000,
-        freeShippingThresholdCentavos: freeShippingThresholdCentavos !== undefined ? parseInt(freeShippingThresholdCentavos) : 300000,
-        enabledWallets: enabledWallets || 'gcash,maya,paypal',
+        platformFeePercent: collected.values.platformFeePercent !== undefined ? collected.values.platformFeePercent : 5,
+        lowStockThreshold: collected.values.lowStockThreshold !== undefined ? collected.values.lowStockThreshold : 5,
+        shippingFeeCentavos: collected.values.shippingFeeCentavos !== undefined ? collected.values.shippingFeeCentavos : 15000,
+        freeShippingThresholdCentavos: collected.values.freeShippingThresholdCentavos !== undefined ? collected.values.freeShippingThresholdCentavos : 300000,
+        enabledWallets: collected.values.enabledWallets || 'gcash,maya,paypal',
         sandboxMode: sandboxMode !== undefined ? Boolean(sandboxMode) : true
       }
     });
@@ -1416,16 +1511,18 @@ router.get('/health', async (req, res, next) => {
     ]);
 
     const demoFallbackEnabled = process.env.DEMO_FALLBACK_ENABLED !== 'false' && process.env.DEMO_MODE === 'true';
+    const psgcHealth = await psgcClient.checkHealth({ forceRefresh: req.query.refresh === 'true' });
 
     res.json({
       success: true,
       data: {
-        status: dbReachable ? 'HEALTHY' : 'DEGRADED',
+        status: dbReachable && psgcHealth.reachable ? 'HEALTHY' : 'DEGRADED',
         checkedAt: new Date().toISOString(),
         databaseReachable: dbReachable,
         databaseLatencyMs: dbLatencyMs,
         sandboxMode: platformCfg ? platformCfg.sandboxMode : true,
-        sandboxProviderReachable: Boolean(process.env.PAYMONGO_SECRET_KEY) || true, // built-in sandbox adapter always available
+        sandboxProviderReachable: true,
+        psgcHealth,
         demoFallbackEnabled,
         lastWebhookReceivedAt: lastWebhook?.receivedAt || null,
         lastWebhookStatus: lastWebhook?.status || null,

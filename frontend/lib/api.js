@@ -263,3 +263,18 @@ export const updateAdminApiSettings = (data) =>
   apiFetch('/admin/api-settings', { method: 'PUT', body: JSON.stringify(data) });
 export const getAdminWebhooks = () => apiFetch('/admin/webhooks');
 export const getAdminHealth = () => apiFetch('/admin/health');
+
+// PSGC Philippine Address API Proxy & Validator
+export const getPsgcHealth = (refresh = false) =>
+  apiFetch(`/locations/health${refresh ? '?refresh=true' : ''}`);
+export const getPsgcRegions = () => apiFetch('/locations/regions');
+export const getPsgcProvinces = (regionCode) =>
+  apiFetch(`/locations/regions/${encodeURIComponent(regionCode)}/provinces`);
+export const getPsgcCitiesByRegion = (regionCode) =>
+  apiFetch(`/locations/regions/${encodeURIComponent(regionCode)}/cities`);
+export const getPsgcCitiesByProvince = (provinceCode) =>
+  apiFetch(`/locations/provinces/${encodeURIComponent(provinceCode)}/cities`);
+export const getPsgcBarangays = (cityCode) =>
+  apiFetch(`/locations/cities/${encodeURIComponent(cityCode)}/barangays`);
+export const validatePsgcAddress = (payload) =>
+  apiFetch('/locations/validate', { method: 'POST', body: JSON.stringify(payload) });

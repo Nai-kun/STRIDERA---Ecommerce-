@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
 const { authenticate, optionalAuth } = require('../middleware/auth.middleware');
+const { validateRequiredText } = require('../lib/validators');
 
 // GET /api/products — List products with filters, search, sort, pagination
 router.get('/', optionalAuth, async (req, res, next) => {
@@ -367,8 +368,9 @@ router.post('/:slug/reviews', authenticate, async (req, res, next) => {
     }
 
     const { rating = 5, sellerRating = 5, comment, orderNumber } = req.body;
-    if (!comment || !comment.trim()) {
-      return res.status(400).json({ success: false, error: { message: 'Review comment is required' } });
+    const commentCheck = validateRequiredText(comment, 'Review comment', { min: 3, max: 2000 });
+    if (!commentCheck.valid) {
+      return res.status(400).json({ success: false, message: commentCheck.error, error: { message: commentCheck.error } });
     }
 
     const review = await prisma.productReview.create({
@@ -378,7 +380,7 @@ router.post('/:slug/reviews', authenticate, async (req, res, next) => {
         orderNumber: orderNumber || null,
         rating: Math.min(5, Math.max(1, parseInt(rating) || 5)),
         sellerRating: Math.min(5, Math.max(1, parseInt(sellerRating) || 5)),
-        comment: comment.trim(),
+        comment: commentCheck.value,
       },
       include: {
         user: { select: { id: true, firstName: true, lastName: true } },

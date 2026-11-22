@@ -10,6 +10,13 @@ import {
   confirmSandboxPayment,
   createSupportTicket
 } from '../../../../lib/api';
+import InlineFieldError from '../../../../components/InlineFieldError';
+import { validateRequiredText, focusFirstInvalidField } from '../../../../lib/validation';
+
+const TICKET_FIELD_IDS = {
+  subject: 'ord-ticket-subject',
+  description: 'ord-ticket-description'
+};
 
 export default function OrderDetailPage() {
   const { orderNumber } = useParams();
@@ -25,6 +32,7 @@ export default function OrderDetailPage() {
     subject: '',
     description: ''
   });
+  const [ticketErrors, setTicketErrors] = useState({});
 
   const loadOrder = useCallback(async () => {
     setLoading(true);
@@ -83,18 +91,36 @@ export default function OrderDetailPage() {
 
   const handleSubmitTicket = async (e) => {
     e.preventDefault();
+    if (actionLoading) return;
+
+    const subjectRes = validateRequiredText(ticketForm.subject, 'Subject', { min: 3, max: 150 });
+    const descRes = validateRequiredText(ticketForm.description, 'Details / Reason', { min: 5, max: 2000 });
+    const nextErrors = {
+      ...(subjectRes.valid ? {} : { subject: subjectRes.error }),
+      ...(descRes.valid ? {} : { description: descRes.error })
+    };
+    setTicketErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      focusFirstInvalidField(nextErrors, TICKET_FIELD_IDS);
+      return;
+    }
+
     setActionLoading(true);
     try {
       const res = await createSupportTicket({
-        ...ticketForm,
+        category: ticketForm.category,
+        subject: subjectRes.value,
+        description: descRes.value,
         orderNumber: order.orderNumber,
         orderId: order.id
       });
       setShowTicketModal(false);
+      setTicketErrors({});
       setTicketForm({ category: 'INQUIRY', subject: '', description: '' });
       setMsg({ type: 'success', text: res.message });
       await loadOrder();
     } catch (err) {
+      if (err.fieldErrors) setTicketErrors(err.fieldErrors);
       setMsg({ type: 'error', text: err.message });
     } finally {
       setActionLoading(false);
@@ -273,7 +299,12 @@ export default function OrderDetailPage() {
               <strong>{order.shippingFullName}</strong><br />
               {order.shippingPhone}<br />
               {order.shippingAddressLine1}{order.shippingAddressLine2 ? `, ${order.shippingAddressLine2}` : ''}<br />
-              {order.shippingCity}, {order.shippingProvince} {order.shippingPostalCode}
+              {order.shippingBarangay ? `Brgy. ${order.shippingBarangay}, ` : ''}{order.shippingCity}, {order.shippingProvince}{order.shippingRegion ? `, ${order.shippingRegion}` : ''} {order.shippingPostalCode}
+              {order.shippingAddressSource === 'PSGC_VERIFIED' && (
+                <span style={{ display: 'inline-block', marginTop: 6, background: 'rgba(22,163,74,0.12)', color: '#166534', padding: '2px 8px', borderRadius: 99, fontSize: '11px', fontWeight: 700 }}>
+                  ✓ PSGC Verified ({order.shippingCityCode}{order.shippingBarangayCode ? ` • ${order.shippingBarangayCode}` : ''})
+                </span>
+              )}
             </p>
 
             <h3 style={{ fontSize: 'var(--text-sm)', fontWeight: 700, marginBottom: 'var(--space-3)' }}>Summary</h3>
@@ -356,10 +387,11 @@ export default function OrderDetailPage() {
             <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 800, marginBottom: 'var(--space-2)' }}>
               Submit Order Support / Return / Refund (FR-8.2)
             </h2>
-            <form onSubmit={handleSubmitTicket}>
+            <form onSubmit={handleSubmitTicket} noValidate>
               <div className="form-group">
-                <label className="form-label">Request Category</label>
+                <label htmlFor="ord-ticket-category" className="form-label">Request Category *</label>
                 <select
+                  id="ord-ticket-category"
                   className="form-select"
                   value={ticketForm.category}
                   onChange={e => setTicketForm(p => ({ ...p, category: e.target.value }))}
@@ -372,27 +404,47 @@ export default function OrderDetailPage() {
                 </select>
               </div>
               <div className="form-group">
-                <label className="form-label">Subject</label>
+                <label htmlFor="ord-ticket-subject" className="form-label">Subject *</label>
                 <input
+                  id="ord-ticket-subject"
                   className="form-input"
+                  maxLength={150}
+                  aria-required="true"
+                  aria-invalid={Boolean(ticketErrors.subject)}
+                  aria-describedby={ticketErrors.subject ? 'ord-ticket-subject-error' : undefined}
                   value={ticketForm.subject}
-                  onChange={e => setTicketForm(p => ({ ...p, subject: e.target.value }))}
+                  onChange={e => {
+                    setTicketForm(p => ({ ...p, subject: e.target.value }));
+                    if (ticketErrors.subject) setTicketErrors(prev => ({ ...prev, subject: null }));
+                  }}
+                  onBlur={e => setTicketErrors(prev => ({ ...prev, subject: validateRequiredText(e.target.value, 'Subject', { min: 3, max: 150 }).error }))}
                   required
                 />
+                <InlineFieldError id="ord-ticket-subject-error" error={ticketErrors.subject} />
               </div>
               <div className="form-group">
-                <label className="form-label">Details / Reason</label>
+                <label htmlFor="ord-ticket-description" className="form-label">Details / Reason *</label>
                 <textarea
+                  id="ord-ticket-description"
                   className="form-input"
                   rows={4}
+                  maxLength={2000}
+                  aria-required="true"
+                  aria-invalid={Boolean(ticketErrors.description)}
+                  aria-describedby={ticketErrors.description ? 'ord-ticket-description-error' : undefined}
                   placeholder="Describe your inquiry, return reason, or refund details…"
                   value={ticketForm.description}
-                  onChange={e => setTicketForm(p => ({ ...p, description: e.target.value }))}
+                  onChange={e => {
+                    setTicketForm(p => ({ ...p, description: e.target.value }));
+                    if (ticketErrors.description) setTicketErrors(prev => ({ ...prev, description: null }));
+                  }}
+                  onBlur={e => setTicketErrors(prev => ({ ...prev, description: validateRequiredText(e.target.value, 'Details / Reason', { min: 5, max: 2000 }).error }))}
                   required
                 />
+                <InlineFieldError id="ord-ticket-description-error" error={ticketErrors.description} />
               </div>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                <button type="button" className="btn btn-ghost" onClick={() => setShowTicketModal(false)}>Cancel</button>
+                <button type="button" className="btn btn-ghost" onClick={() => { setShowTicketModal(false); setTicketErrors({}); }}>Cancel</button>
                 <button type="submit" className="btn btn-primary" disabled={actionLoading}>
                   {actionLoading ? 'Submitting…' : 'Submit Ticket'}
                 </button>

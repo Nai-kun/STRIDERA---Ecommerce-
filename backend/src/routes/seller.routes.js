@@ -6,6 +6,21 @@ const prisma = require('../lib/prisma');
 const { authenticate, requireSeller } = require('../middleware/auth.middleware');
 const { upload, saveValidatedProductImage, MAX_IMAGES_PER_PRODUCT } = require('../lib/imageUpload');
 const { body, validationResult } = require('express-validator');
+const {
+  ALLOWED_AUDIENCES,
+  ALLOWED_SHOE_TYPES,
+  normalizePhMobile,
+  validateEntityName,
+  validateOptionalText,
+  validateOptionalUrl,
+  validateSku,
+  validatePriceCentavos,
+  validateShoeSize,
+  validateColor,
+  validateStock,
+  collectFieldErrors,
+  sendValidationError
+} = require('../lib/validators');
 
 const HIGH_LOW_PERCENT = 0.20;
 const LOW_STOCK_THRESHOLD = 5;
@@ -56,24 +71,24 @@ router.get('/profile', async (req, res, next) => {
 });
 
 // PUT /api/seller/profile
-router.put('/profile', [
-  body('storeName').optional().trim().notEmpty().withMessage('Store name cannot be empty'),
-  body('storeDescription').optional().trim(),
-  body('storeLogoUrl').optional().trim(),
-  body('identificationDetails').optional().trim(),
-  body('phone').optional().trim()
-], async (req, res, next) => {
+router.put('/profile', async (req, res, next) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
+    const b = req.body || {};
+    const collected = collectFieldErrors({
+      storeName: validateEntityName(b.storeName, 'Store name', { required: b.storeName !== undefined, min: 2, max: 80 }),
+      storeDescription: validateOptionalText(b.storeDescription, 'Store description', { max: 1000 }),
+      storeLogoUrl: validateOptionalUrl(b.storeLogoUrl, 'Store logo URL'),
+      identificationDetails: validateOptionalText(b.identificationDetails, 'Identification details', { max: 300 }),
+      phone: normalizePhMobile(b.phone, { required: false })
+    });
+    if (!collected.ok) return sendValidationError(res, collected);
 
-    const { storeName, storeDescription, storeLogoUrl, identificationDetails, phone } = req.body;
     const updateData = {};
-    if (storeName) updateData.storeName = storeName;
-    if (storeDescription !== undefined) updateData.storeDescription = storeDescription;
-    if (storeLogoUrl !== undefined) updateData.storeLogoUrl = storeLogoUrl;
-    if (identificationDetails !== undefined) updateData.identificationDetails = identificationDetails;
-    if (phone !== undefined) updateData.phone = phone;
+    if (b.storeName !== undefined) updateData.storeName = collected.values.storeName;
+    if (b.storeDescription !== undefined) updateData.storeDescription = collected.values.storeDescription;
+    if (b.storeLogoUrl !== undefined) updateData.storeLogoUrl = collected.values.storeLogoUrl;
+    if (b.identificationDetails !== undefined) updateData.identificationDetails = collected.values.identificationDetails;
+    if (b.phone !== undefined) updateData.phone = collected.values.phone;
 
     const updated = await prisma.user.update({
       where: { id: req.user.id },
@@ -459,16 +474,32 @@ router.get('/products/:id', async (req, res, next) => {
 
 // POST /api/seller/products — Create product for this seller
 router.post('/products', [
-  body('name').trim().notEmpty().withMessage('Product name required'),
-  body('sku').trim().notEmpty().withMessage('SKU required'),
-  body('categoryId').isUUID().withMessage('Valid category ID required'),
-  body('basePriceCentavos').isInt({ min: 100 }).withMessage('Base price must be at least ₱1.00 (100 centavos)'),
-  body('audience').isIn(['MEN', 'WOMEN', 'UNISEX']).withMessage('Valid audience required'),
-  body('shoeType').isIn(['RUNNING', 'LIFESTYLE', 'BASKETBALL', 'TRAINING', 'CASUAL', 'BOOTS', 'FORMAL', 'LOAFERS']).withMessage('Valid shoe type required')
+  body('categoryId').isUUID().withMessage('Valid category ID required')
 ], async (req, res, next) => {
   try {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, message: 'Valid category ID required.', errors: errors.array() });
+
+    const b = req.body || {};
+    const collected = collectFieldErrors({
+      name: validateEntityName(b.name, 'Product name', { min: 2, max: 80 }),
+      sku: validateSku(b.sku, 'SKU'),
+      basePriceCentavos: validatePriceCentavos(b.basePriceCentavos, { required: true, label: 'Base price' }),
+      compareAtPriceCentavos: validatePriceCentavos(b.compareAtPriceCentavos, { required: false, label: 'Compare at price' }),
+      description: validateOptionalText(b.description, 'Description', { max: 2000 }),
+      features: validateOptionalText(b.features, 'Features', { max: 1000 })
+    });
+    if (!ALLOWED_AUDIENCES.includes(b.audience)) {
+      collected.fieldErrors.audience = 'Valid audience required.';
+      collected.ok = false;
+      collected.firstError = collected.firstError || collected.fieldErrors.audience;
+    }
+    if (!ALLOWED_SHOE_TYPES.includes(b.shoeType)) {
+      collected.fieldErrors.shoeType = 'Valid shoe type required.';
+      collected.ok = false;
+      collected.firstError = collected.firstError || collected.fieldErrors.shoeType;
+    }
+    if (!collected.ok) return sendValidationError(res, collected);
 
     const sellerId = req.user.id;
 
@@ -477,10 +508,11 @@ router.post('/products', [
       include: { brand: true }
     });
 
+    const { categoryId, audience, shoeType } = b;
     const {
-      name, sku, categoryId, description, features,
-      basePriceCentavos, compareAtPriceCentavos, audience, shoeType
-    } = req.body;
+      name, sku, description, features,
+      basePriceCentavos, compareAtPriceCentavos
+    } = collected.values;
 
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') + '-' + Date.now();
 
@@ -535,10 +567,32 @@ router.put('/products/:id', async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Product not found' });
     }
 
-    const {
-      name, categoryId, description, features, basePriceCentavos,
-      compareAtPriceCentavos, audience, shoeType, isActive, status
-    } = req.body;
+    const b = req.body || {};
+    const collected = collectFieldErrors({
+      ...(b.name !== undefined ? { name: validateEntityName(b.name, 'Product name', { min: 2, max: 80 }) } : {}),
+      ...(b.basePriceCentavos !== undefined ? { basePriceCentavos: validatePriceCentavos(b.basePriceCentavos, { required: true, label: 'Base price' }) } : {}),
+      ...(b.compareAtPriceCentavos !== undefined ? { compareAtPriceCentavos: validatePriceCentavos(b.compareAtPriceCentavos, { required: false, label: 'Compare at price' }) } : {}),
+      ...(b.description !== undefined ? { description: validateOptionalText(b.description, 'Description', { max: 2000 }) } : {}),
+      ...(b.features !== undefined ? { features: validateOptionalText(b.features, 'Features', { max: 1000 }) } : {})
+    });
+    if (b.audience !== undefined && !ALLOWED_AUDIENCES.includes(b.audience)) {
+      collected.fieldErrors.audience = 'Valid audience required.';
+      collected.ok = false;
+      collected.firstError = collected.firstError || collected.fieldErrors.audience;
+    }
+    if (b.shoeType !== undefined && !ALLOWED_SHOE_TYPES.includes(b.shoeType)) {
+      collected.fieldErrors.shoeType = 'Valid shoe type required.';
+      collected.ok = false;
+      collected.firstError = collected.firstError || collected.fieldErrors.shoeType;
+    }
+    if (!collected.ok) return sendValidationError(res, collected);
+
+    const { categoryId, audience, shoeType, isActive, status } = b;
+    const name = collected.values.name;
+    const description = collected.values.description;
+    const features = collected.values.features;
+    const basePriceCentavos = collected.values.basePriceCentavos;
+    const compareAtPriceCentavos = collected.values.compareAtPriceCentavos;
 
     const resolvedStatus = status && ['ACTIVE', 'DRAFT', 'ARCHIVED'].includes(status)
       ? status
@@ -720,16 +774,8 @@ router.delete('/products/:id/images/:imageId', async (req, res, next) => {
 // ────────────────────────────────────────────────
 
 // POST /api/seller/products/:id/variants
-router.post('/products/:id/variants', [
-  body('variantSku').trim().notEmpty().withMessage('Variant SKU required'),
-  body('size').trim().notEmpty().withMessage('Size required'),
-  body('color').trim().notEmpty().withMessage('Color required'),
-  body('stockQuantity').isInt({ min: 0 }).withMessage('Stock must be at least 0')
-], async (req, res, next) => {
+router.post('/products/:id/variants', async (req, res, next) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
-
     const product = await prisma.product.findFirst({
       where: { id: req.params.id, sellerId: req.user.id }
     });
@@ -738,7 +784,18 @@ router.post('/products/:id/variants', [
       return res.status(404).json({ success: false, message: 'Product not found' });
     }
 
-    const { variantSku, size, color, colorHex, priceOverrideCentavos, stockQuantity } = req.body;
+    const b = req.body || {};
+    const collected = collectFieldErrors({
+      variantSku: validateSku(b.variantSku, 'Variant SKU'),
+      size: validateShoeSize(b.size),
+      color: validateColor(b.color),
+      stockQuantity: validateStock(b.stockQuantity),
+      priceOverrideCentavos: validatePriceCentavos(b.priceOverrideCentavos, { required: false, label: 'Price override' })
+    });
+    if (!collected.ok) return sendValidationError(res, collected);
+
+    const { colorHex } = b;
+    const { variantSku, size, color, stockQuantity, priceOverrideCentavos } = collected.values;
 
     const existingSku = await prisma.productVariant.findUnique({ where: { variantSku } });
     if (existingSku) return res.status(400).json({ success: false, message: 'Variant SKU already exists' });

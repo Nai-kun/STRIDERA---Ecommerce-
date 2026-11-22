@@ -2,8 +2,23 @@
 const express = require('express');
 const router = express.Router();
 const argon2 = require('argon2');
-const { body, validationResult } = require('express-validator');
 const prisma = require('../lib/prisma');
+const psgcClient = require('../services/psgcClient');
+const {
+  normalizePhMobile,
+  validateEmail,
+  validatePersonName,
+  validateEntityName,
+  validatePassword,
+  validateStreet,
+  validateCityOrProvince,
+  validatePostalCode,
+  validateOptionalText,
+  validateRequiredText,
+  validateOptionalUrl,
+  collectFieldErrors,
+  sendValidationError
+} = require('../lib/validators');
 const {
   authenticate,
   optionalAuth,
@@ -21,44 +36,30 @@ const loginLimiter = rateLimit({
 });
 
 // POST /api/auth/register — Shopper Registration (FR-1.1)
-router.post('/register', [
-  body('email')
-    .trim()
-    .isEmail()
-    .withMessage('Valid email required')
-    .custom(val => {
-      if (!val.toLowerCase().endsWith('@gmail.com')) {
-        throw new Error('Only @gmail.com email addresses are accepted');
-      }
-      return true;
-    }),
-  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
-  body('firstName')
-    .trim()
-    .notEmpty()
-    .withMessage('First name required')
-    .matches(/^[A-Za-z\s\-'.]+$/)
-    .withMessage('First name must contain only letters'),
-  body('lastName')
-    .trim()
-    .notEmpty()
-    .withMessage('Last name required')
-    .matches(/^[A-Za-z\s\-'.]+$/)
-    .withMessage('Last name must contain only letters'),
-  body('phone')
-    .trim()
-    .matches(/^\+63 9\d{2}-\d{3}-\d{4}$/)
-    .withMessage('Mobile number must be in Philippine international format: +63 9XX-XXX-YYYY (e.g. +63 917-123-4567)'),
-], async (req, res, next) => {
+router.post('/register', async (req, res, next) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ success: false, error: { message: 'Validation failed', details: errors.array() } });
+    const bodyData = req.body || {};
+    const collected = collectFieldErrors({
+      firstName: validatePersonName(bodyData.firstName, 'First name'),
+      lastName: validatePersonName(bodyData.lastName, 'Last name'),
+      email: validateEmail(bodyData.email, { required: true, applyPolicy: true }),
+      phone: normalizePhMobile(bodyData.phone, { required: true }),
+      password: validatePassword(bodyData.password, { required: true, checkStrength: true })
+    });
+    if (bodyData.confirmPassword !== undefined && bodyData.confirmPassword !== bodyData.password) {
+      collected.fieldErrors.confirmPassword = 'Passwords do not match.';
+      collected.ok = false;
+      collected.firstError = collected.firstError || collected.fieldErrors.confirmPassword;
+    }
+    if (!collected.ok) {
+      return sendValidationError(res, collected);
     }
 
-    const { email, password, firstName, lastName, phone } = req.body;
+    const { firstName, lastName, email, phone, password } = collected.values;
 
-    const existing = await prisma.user.findUnique({ where: { email } });
+    const existing = await prisma.user.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' } }
+    });
     if (existing) {
       throw createError('An account with this email already exists', 409);
     }
@@ -82,48 +83,37 @@ router.post('/register', [
 });
 
 // POST /api/auth/register-seller — Seller Registration & Verification Request (FR-5.1, FR-5.2)
-router.post('/register-seller', [
-  body('email')
-    .trim()
-    .isEmail()
-    .withMessage('Valid email required')
-    .custom(val => {
-      if (!val.toLowerCase().endsWith('@gmail.com')) {
-        throw new Error('Only @gmail.com email addresses are accepted');
-      }
-      return true;
-    }),
-  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
-  body('firstName')
-    .trim()
-    .notEmpty()
-    .withMessage('First name required')
-    .matches(/^[A-Za-z\s\-'.]+$/)
-    .withMessage('First name must contain only letters'),
-  body('lastName')
-    .trim()
-    .notEmpty()
-    .withMessage('Last name required')
-    .matches(/^[A-Za-z\s\-'.]+$/)
-    .withMessage('Last name must contain only letters'),
-  body('storeName').trim().notEmpty().withMessage('Store name required'),
-  body('storeDescription').optional().trim(),
-  body('storeLogoUrl').optional().trim(),
-  body('identificationDetails').optional().trim(),
-  body('phone')
-    .trim()
-    .matches(/^\+63 9\d{2}-\d{3}-\d{4}$/)
-    .withMessage('Mobile number must be in Philippine international format: +63 9XX-XXX-YYYY (e.g. +63 917-123-4567)'),
-], async (req, res, next) => {
+router.post('/register-seller', async (req, res, next) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ success: false, error: { message: 'Validation failed', details: errors.array() } });
+    const bodyData = req.body || {};
+    const collected = collectFieldErrors({
+      storeName: validateEntityName(bodyData.storeName, 'Store name', { min: 2, max: 80 }),
+      storeDescription: validateOptionalText(bodyData.storeDescription, 'Store description', { max: 1000 }),
+      storeLogoUrl: validateOptionalUrl(bodyData.storeLogoUrl, 'Store logo URL'),
+      identificationDetails: validateRequiredText(bodyData.identificationDetails, 'Business / DTI / TIN ID details', { min: 3, max: 300 }),
+      firstName: validatePersonName(bodyData.firstName, 'First name'),
+      lastName: validatePersonName(bodyData.lastName, 'Last name'),
+      email: validateEmail(bodyData.email, { required: true, applyPolicy: true }),
+      phone: normalizePhMobile(bodyData.phone, { required: true }),
+      password: validatePassword(bodyData.password, { required: true, checkStrength: true })
+    });
+    if (bodyData.confirmPassword !== undefined && bodyData.confirmPassword !== bodyData.password) {
+      collected.fieldErrors.confirmPassword = 'Passwords do not match.';
+      collected.ok = false;
+      collected.firstError = collected.firstError || collected.fieldErrors.confirmPassword;
+    }
+    if (!collected.ok) {
+      return sendValidationError(res, collected);
     }
 
-    const { email, password, firstName, lastName, phone, storeName, storeDescription, storeLogoUrl, identificationDetails } = req.body;
+    const {
+      email, password, firstName, lastName, phone,
+      storeName, storeDescription, storeLogoUrl, identificationDetails
+    } = collected.values;
 
-    const existing = await prisma.user.findUnique({ where: { email } });
+    const existing = await prisma.user.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' } }
+    });
     if (existing) {
       throw createError('An account with this email already exists', 409);
     }
@@ -143,7 +133,7 @@ router.post('/register-seller', [
         storeName,
         storeDescription,
         storeLogoUrl: storeLogoUrl || null,
-        identificationDetails: identificationDetails || 'Pending DTI/Business ID Verification'
+        identificationDetails
       },
       select: {
         id: true,
@@ -184,20 +174,23 @@ router.post('/register-seller', [
 });
 
 // POST /api/auth/login — User Login across all 7 Roles (FR-1.2, FR-1.3, FR-1.4, FR-1.9)
-router.post('/login', loginLimiter, [
-  body('email').isEmail().normalizeEmail(),
-  body('password').notEmpty(),
-], async (req, res, next) => {
+router.post('/login', loginLimiter, async (req, res, next) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ success: false, error: { message: 'Validation failed', details: errors.array() } });
+    const bodyData = req.body || {};
+    // Note: applyPolicy=false so existing accounts on any domain are never locked out by EMAIL_POLICY
+    const collected = collectFieldErrors({
+      email: validateEmail(bodyData.email, { required: true, applyPolicy: false }),
+      password: validatePassword(bodyData.password, { required: true, checkStrength: false })
+    });
+    if (!collected.ok) {
+      return sendValidationError(res, collected);
     }
 
-    const { email, password, keepSignedIn = true } = req.body;
+    const { email, password } = collected.values;
+    const keepSignedIn = bodyData.keepSignedIn !== false;
 
-    const user = await prisma.user.findUnique({
-      where: { email },
+    const user = await prisma.user.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' } },
       select: {
         id: true,
         email: true,
@@ -219,16 +212,12 @@ router.post('/login', loginLimiter, [
       },
     });
 
-    if (!user || !user.isActive || (user.accountStatus && user.accountStatus !== 'ACTIVE')) {
-      throw createError('Invalid email/password or account is deactivated/suspended', 401);
+    const validPassword = user ? await argon2.verify(user.passwordHash, password) : false;
+    if (!user || !user.isActive || (user.accountStatus && user.accountStatus !== 'ACTIVE') || !validPassword) {
+      throw createError('Invalid email or password.', 401);
     }
 
-    const validPassword = await argon2.verify(user.passwordHash, password);
-    if (!validPassword) {
-      throw createError('Invalid email or password', 401);
-    }
-
-    const { jwtToken: token } = await issuePersistentSession(res, user.id, keepSignedIn !== false);
+    const { jwtToken: token } = await issuePersistentSession(res, user.id, keepSignedIn);
 
     const { passwordHash, ...userData } = user;
     res.json({
@@ -264,22 +253,30 @@ router.get('/me', authenticate, async (req, res) => {
 });
 
 // PUT /api/auth/profile — Update profile (FR-1.6)
-router.put('/profile', authenticate, [
-  body('firstName').optional().trim().notEmpty(),
-  body('lastName').optional().trim().notEmpty(),
-  body('phone').optional().trim(),
-], async (req, res, next) => {
+router.put('/profile', authenticate, async (req, res, next) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ success: false, error: { message: 'Validation failed', details: errors.array() } });
+    const bodyData = req.body || {};
+    const collected = collectFieldErrors({
+      firstName: validatePersonName(bodyData.firstName, 'First name', { required: bodyData.firstName !== undefined }),
+      lastName: validatePersonName(bodyData.lastName, 'Last name', { required: bodyData.lastName !== undefined }),
+      ...(bodyData.email !== undefined ? { email: validateEmail(bodyData.email, { required: true, applyPolicy: true }) } : {}),
+      phone: normalizePhMobile(bodyData.phone, { required: false })
+    });
+    if (!collected.ok) {
+      return sendValidationError(res, collected);
     }
 
-    const { firstName, lastName, phone } = req.body;
     const updateData = {};
-    if (firstName) updateData.firstName = firstName;
-    if (lastName) updateData.lastName = lastName;
-    if (phone !== undefined) updateData.phone = phone;
+    if (bodyData.firstName !== undefined) updateData.firstName = collected.values.firstName;
+    if (bodyData.lastName !== undefined) updateData.lastName = collected.values.lastName;
+    if (bodyData.phone !== undefined) updateData.phone = collected.values.phone;
+    if (bodyData.email !== undefined) {
+      const dup = await prisma.user.findFirst({
+        where: { email: { equals: collected.values.email, mode: 'insensitive' }, id: { not: req.user.id } }
+      });
+      if (dup) throw createError('An account with this email already exists', 409);
+      updateData.email = collected.values.email;
+    }
 
     const user = await prisma.user.update({
       where: { id: req.user.id },
@@ -294,17 +291,30 @@ router.put('/profile', authenticate, [
 });
 
 // PUT /api/auth/password — Change password for logged-in user (FR-1.7)
-router.put('/password', authenticate, [
-  body('currentPassword').notEmpty().withMessage('Current password required'),
-  body('newPassword').isLength({ min: 8 }).withMessage('New password must be at least 8 characters'),
-], async (req, res, next) => {
+router.put('/password', authenticate, async (req, res, next) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ success: false, error: { message: 'Validation failed', details: errors.array() } });
+    const bodyData = req.body || {};
+    const currentPassword = typeof bodyData.currentPassword === 'string' ? bodyData.currentPassword : '';
+    const newPassword = typeof bodyData.newPassword === 'string' ? bodyData.newPassword : '';
+    const confirmPassword = typeof bodyData.confirmPassword === 'string' ? bodyData.confirmPassword : undefined;
+
+    const currentCheck = validatePassword(currentPassword, { required: true, checkStrength: false, label: 'Current password' });
+    const newCheck = validatePassword(newPassword, { required: true, checkStrength: true, label: 'New password' });
+
+    const checks = {
+      currentPassword: currentCheck,
+      newPassword: newCheck,
+    };
+
+    if (confirmPassword !== undefined && newCheck.valid && newPassword !== confirmPassword) {
+      checks.confirmPassword = { valid: false, value: null, error: 'Passwords do not match.' };
     }
 
-    const { currentPassword, newPassword } = req.body;
+    const collected = collectFieldErrors(checks);
+    if (!collected.ok) {
+      return sendValidationError(res, collected);
+    }
+
     const user = await prisma.user.findUnique({ where: { id: req.user.id } });
     if (!user) throw createError('User not found', 404);
 
@@ -338,18 +348,24 @@ router.put('/password', authenticate, [
 });
 
 // POST /api/auth/forgot-password — Password Recovery / Reset (FR-1.7)
-router.post('/forgot-password', [
-  body('email').isEmail().normalizeEmail().withMessage('Valid email required'),
-  body('newPassword').optional().isLength({ min: 8 }).withMessage('New password must be at least 8 characters'),
-], async (req, res, next) => {
+router.post('/forgot-password', async (req, res, next) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ success: false, error: { message: 'Validation failed', details: errors.array() } });
+    const bodyData = req.body || {};
+    const collected = collectFieldErrors({
+      email: validateEmail(bodyData.email, { required: true, applyPolicy: false }),
+      newPassword: validatePassword(bodyData.newPassword, { required: false, checkStrength: true, label: 'New password' })
+    });
+    if (bodyData.confirmPassword !== undefined && bodyData.newPassword && bodyData.confirmPassword !== bodyData.newPassword) {
+      collected.fieldErrors.confirmPassword = 'Passwords do not match.';
+      collected.ok = false;
+      collected.firstError = collected.firstError || collected.fieldErrors.confirmPassword;
+    }
+    if (!collected.ok) {
+      return sendValidationError(res, collected);
     }
 
-    const { email, newPassword } = req.body;
-    const user = await prisma.user.findUnique({ where: { email } });
+    const { email, newPassword } = collected.values;
+    const user = await prisma.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' } } });
 
     if (user && newPassword) {
       const passwordHash = await argon2.hash(newPassword);
@@ -382,21 +398,73 @@ router.post('/forgot-password', [
 });
 
 // POST /api/auth/addresses — Add address (FR-1.6)
-router.post('/addresses', authenticate, [
-  body('fullName').trim().notEmpty().withMessage('Full name required'),
-  body('phone').trim().notEmpty().withMessage('Phone required'),
-  body('addressLine1').trim().notEmpty().withMessage('Address required'),
-  body('city').trim().notEmpty().withMessage('City required'),
-  body('province').trim().notEmpty().withMessage('Province required'),
-  body('postalCode').trim().notEmpty().withMessage('Postal code required'),
-], async (req, res, next) => {
+router.post('/addresses', authenticate, async (req, res, next) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ success: false, error: { message: 'Validation failed', details: errors.array() } });
+    const bodyData = req.body || {};
+    const collected = collectFieldErrors({
+      fullName: validatePersonName(bodyData.fullName, 'Recipient full name'),
+      phone: normalizePhMobile(bodyData.phone, { required: true }),
+      addressLine1: validateStreet(bodyData.addressLine1),
+      addressLine2: validateOptionalText(bodyData.addressLine2, 'Address line 2', { max: 200 }),
+      city: validateCityOrProvince(bodyData.city, 'City'),
+      province: validateCityOrProvince(bodyData.province, 'Province'),
+      postalCode: validatePostalCode(bodyData.postalCode),
+      label: validateOptionalText(bodyData.label, 'Address label', { max: 50 })
+    });
+    if (!collected.ok) {
+      return sendValidationError(res, collected);
     }
 
-    const { fullName, phone, addressLine1, addressLine2, city, province, postalCode, label, isDefault } = req.body;
+    const {
+      region, barangay,
+      regionCode, provinceCode, cityCode, barangayCode, addressSource,
+      isDefault
+    } = bodyData;
+    const {
+      fullName, phone, addressLine1, addressLine2,
+      city, province, postalCode, label
+    } = collected.values;
+
+    let resolvedCity = city;
+    let resolvedProvince = province;
+    let resolvedRegion = region || null;
+    let resolvedBarangay = barangay || null;
+    let resolvedRegionCode = regionCode || null;
+    let resolvedProvinceCode = provinceCode || null;
+    let resolvedCityCode = cityCode || null;
+    let resolvedBarangayCode = barangayCode || null;
+    let resolvedAddressSource = addressSource === 'MANUAL_FALLBACK' ? 'MANUAL_FALLBACK' : 'MANUAL';
+
+    if (resolvedRegionCode || resolvedProvinceCode || resolvedCityCode || resolvedBarangayCode) {
+      let verified;
+      try {
+        verified = await psgcClient.validateAddressHierarchy({
+          regionCode: resolvedRegionCode,
+          provinceCode: resolvedProvinceCode,
+          cityCode: resolvedCityCode,
+          barangayCode: resolvedBarangayCode
+        });
+      } catch (psgcErr) {
+        if (psgcErr instanceof psgcClient.PsgcError || psgcErr?.name === 'PsgcError') {
+          return res.status(psgcErr.statusCode || 400).json({
+            success: false,
+            code: psgcErr.code || 'PSGC_ERROR',
+            message: psgcErr.message,
+            degraded: (psgcErr.statusCode || 500) >= 500
+          });
+        }
+        throw psgcErr;
+      }
+      resolvedRegion = verified.regionName;
+      resolvedProvince = verified.provinceName;
+      resolvedCity = verified.cityName;
+      resolvedBarangay = verified.barangayName || resolvedBarangay;
+      resolvedRegionCode = verified.regionCode;
+      resolvedProvinceCode = verified.provinceCode;
+      resolvedCityCode = verified.cityCode;
+      resolvedBarangayCode = verified.barangayCode;
+      resolvedAddressSource = 'PSGC_VERIFIED';
+    }
 
     if (isDefault) {
       await prisma.address.updateMany({
@@ -408,7 +476,21 @@ router.post('/addresses', authenticate, [
     const address = await prisma.address.create({
       data: {
         userId: req.user.id,
-        fullName, phone, addressLine1, addressLine2, city, province, postalCode, label,
+        fullName,
+        phone,
+        addressLine1,
+        addressLine2,
+        barangay: resolvedBarangay,
+        city: resolvedCity,
+        province: resolvedProvince,
+        region: resolvedRegion,
+        regionCode: resolvedRegionCode,
+        provinceCode: resolvedProvinceCode,
+        cityCode: resolvedCityCode,
+        barangayCode: resolvedBarangayCode,
+        addressSource: resolvedAddressSource,
+        postalCode,
+        label,
         isDefault: isDefault || false,
       },
     });

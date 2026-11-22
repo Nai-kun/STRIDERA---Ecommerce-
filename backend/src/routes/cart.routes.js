@@ -4,6 +4,7 @@ const router = express.Router();
 const prisma = require('../lib/prisma');
 const { authenticate, optionalAuth } = require('../middleware/auth.middleware');
 const { body, param, validationResult } = require('express-validator');
+const { validateQuantity } = require('../lib/validators');
 const { v4: uuidv4 } = require('uuid');
 
 /**
@@ -129,7 +130,11 @@ router.get('/', optionalAuth, async (req, res, next) => {
 router.post('/items', [
   optionalAuth,
   body('productVariantId').isUUID().withMessage('Valid variant ID required'),
-  body('quantity').isInt({ min: 1, max: 10 }).withMessage('Quantity must be 1-10')
+  body('quantity').custom(val => {
+    const chk = validateQuantity(val);
+    if (!chk.valid) throw new Error(chk.error);
+    return true;
+  })
 ], async (req, res, next) => {
   try {
     const errors = validationResult(req);
@@ -213,7 +218,11 @@ router.post('/items', [
 router.patch('/items/:itemId', [
   optionalAuth,
   param('itemId').isUUID(),
-  body('quantity').isInt({ min: 1, max: 10 }).withMessage('Quantity must be 1-10')
+  body('quantity').custom(val => {
+    const chk = validateQuantity(val);
+    if (!chk.valid) throw new Error(chk.error);
+    return true;
+  })
 ], async (req, res, next) => {
   try {
     const errors = validationResult(req);

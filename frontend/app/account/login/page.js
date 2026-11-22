@@ -4,17 +4,14 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { login, forgotPassword, getMe } from '../../../lib/api';
-
-const DEMO_ROLES = [
-  { role: '1. Shopper', email: 'demo@stridera.ph', pass: 'Customer@123!', portal: '/shop', badge: '#0284c7' },
-  { role: '2a. Seller (Apex)', email: 'seller@stridera.ph', pass: 'Seller@123!', portal: '/seller/dashboard', badge: '#059669' },
-  { role: '2b. Seller (Manila Sole)', email: 'sole@stridera.ph', pass: 'Seller@123!', portal: '/seller/dashboard', badge: '#0d9488' },
-  { role: '3. Administrator', email: 'admin@stridera.ph', pass: 'Admin@Stridera2024!', portal: '/admin/dashboard', badge: '#7c3aed' },
-  { role: '4. Inventory Manager', email: 'inventory@stridera.ph', pass: 'Inventory@123!', portal: '/inventory', badge: '#d97706' },
-  { role: '5. Delivery Personnel', email: 'delivery@stridera.ph', pass: 'Delivery@123!', portal: '/delivery', badge: '#ea580c' },
-  { role: '6. Customer Support', email: 'support@stridera.ph', pass: 'Support@123!', portal: '/support', badge: '#2563eb' },
-  { role: '7. Finance Officer', email: 'finance@stridera.ph', pass: 'Finance@123!', portal: '/finance', badge: '#16a34a' }
-];
+import {
+  EMAIL_POLICY,
+  validateEmail,
+  validatePassword,
+  focusFirstInvalidField
+} from '../../../lib/validation';
+import InlineFieldError from '../../../components/InlineFieldError';
+import PasswordInput from '../../../components/PasswordInput';
 
 function getRedirectForRole(role) {
   switch (role) {
@@ -31,6 +28,7 @@ function getRedirectForRole(role) {
 export default function LoginPage() {
   const router = useRouter();
   const [form, setForm] = useState({ email: '', password: '' });
+  const [fieldErrors, setFieldErrors] = useState({});
   const [keepSignedIn, setKeepSignedIn] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -52,13 +50,45 @@ export default function LoginPage() {
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [recoveryEmail, setRecoveryEmail] = useState('');
   const [recoveryNewPass, setRecoveryNewPass] = useState('');
+  const [recoveryConfirmPass, setRecoveryConfirmPass] = useState('');
+  const [recoveryErrors, setRecoveryErrors] = useState({});
   const [recoveryMsg, setRecoveryMsg] = useState(null);
 
-  const performLogin = async (email, password) => {
-    setLoading(true);
+  const validateLoginField = (field, nextVal) => {
+    if (field === 'email') {
+      const res = validateEmail(nextVal, { required: true, applyPolicy: false });
+      return res.valid ? null : res.error;
+    }
+    if (field === 'password') {
+      const res = validatePassword(nextVal, { required: true, checkStrength: false });
+      return res.valid ? null : res.error;
+    }
+    return null;
+  };
+
+  const handleBlur = (field) => {
+    const err = validateLoginField(field, form[field]);
+    setFieldErrors((prev) => ({ ...prev, [field]: err }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (loading) return;
     setError(null);
+
+    const errors = {
+      email: validateLoginField('email', form.email),
+      password: validateLoginField('password', form.password)
+    };
+    setFieldErrors(errors);
+    if (errors.email || errors.password) {
+      focusFirstInvalidField(errors, { email: 'email', password: 'password' });
+      return;
+    }
+
+    setLoading(true);
     try {
-      const data = await login(email, password, keepSignedIn);
+      const data = await login(form.email.trim().toLowerCase(), form.password, keepSignedIn);
       const user = data.data?.user;
       const token = data.data?.token;
       if (typeof window !== 'undefined') {
@@ -66,23 +96,33 @@ export default function LoginPage() {
         if (user) localStorage.setItem('stridera_user', JSON.stringify(user));
       }
       router.push(getRedirectForRole(user?.role));
-    } catch (e) {
-      setError(e.message || 'Login failed');
+    } catch {
+      setError('Invalid email or password.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    await performLogin(form.email, form.password);
-  };
-
   const handlePasswordRecovery = async (e) => {
     e.preventDefault();
     setRecoveryMsg(null);
+    const emailChk = validateEmail(recoveryEmail, { required: true, applyPolicy: false, policy: EMAIL_POLICY });
+    const passChk = validatePassword(recoveryNewPass, { required: false, checkStrength: true, label: 'New password' });
+    const confirmErr = recoveryNewPass && recoveryConfirmPass !== recoveryNewPass ? 'Passwords do not match.' : null;
+
+    const rErrors = {
+      email: emailChk.valid ? null : emailChk.error,
+      newPassword: passChk.valid ? null : passChk.error,
+      confirmPassword: confirmErr
+    };
+    setRecoveryErrors(rErrors);
+    if (rErrors.email || rErrors.newPassword || rErrors.confirmPassword) {
+      focusFirstInvalidField(rErrors, { email: 'rec-email', newPassword: 'rec-pass', confirmPassword: 'rec-confirm' });
+      return;
+    }
+
     try {
-      const res = await forgotPassword(recoveryEmail, recoveryNewPass || undefined);
+      const res = await forgotPassword(emailChk.value, recoveryNewPass || undefined);
       setRecoveryMsg({ type: 'success', text: res.message });
     } catch (err) {
       setRecoveryMsg({ type: 'error', text: err.message || 'Recovery request failed' });
@@ -91,7 +131,7 @@ export default function LoginPage() {
 
   return (
     <div style={{ minHeight: '100vh', display: 'grid', gridTemplateColumns: '1.15fr 0.85fr' }}>
-      {/* Left panel — form + 7-Role Quick Switcher */}
+      {/* Left panel — clean sign-in form */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--space-8)', background: 'var(--color-bg)' }}>
         <div style={{ width: '100%', maxWidth: 480 }}>
           <Link href="/" style={{ display: 'inline-block', marginBottom: 'var(--space-6)' }}>
@@ -100,7 +140,7 @@ export default function LoginPage() {
 
           <h1 style={{ fontSize: 'var(--text-3xl)', fontWeight: 800, marginBottom: 'var(--space-1)' }}>Sign in to STRIDERA</h1>
           <p style={{ color: 'var(--color-text-muted)', marginBottom: 'var(--space-6)', fontSize: 'var(--text-sm)' }}>
-            Unified Authentication &amp; Role-Based Access Control across all 7 System Roles
+            Enter your account credentials to continue.
           </p>
 
           {error && (
@@ -114,20 +154,32 @@ export default function LoginPage() {
 
           <form onSubmit={handleSubmit} noValidate>
             <div className="form-group">
-              <label className="form-label" htmlFor="email">Email address</label>
+              <label className="form-label" htmlFor="email">Email Address *</label>
               <input
                 id="email"
                 type="email"
                 className="form-input"
+                placeholder="name@gmail.com"
                 value={form.email}
-                onChange={e => setForm(p => ({ ...p, email: e.target.value }))}
+                onChange={e => {
+                  const val = e.target.value;
+                  setForm(p => ({ ...p, email: val }));
+                  if (fieldErrors.email) setFieldErrors(p => ({ ...p, email: validateLoginField('email', val) }));
+                }}
+                onBlur={() => handleBlur('email')}
                 required
+                aria-required="true"
+                aria-invalid={Boolean(fieldErrors.email)}
+                aria-describedby={fieldErrors.email ? 'email-error' : undefined}
                 autoComplete="email"
+                maxLength={254}
               />
+              <InlineFieldError id="email-error" error={fieldErrors.email} />
             </div>
+
             <div className="form-group">
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-2)' }}>
-                <label className="form-label" htmlFor="password" style={{ margin: 0 }}>Password</label>
+                <label className="form-label" htmlFor="password" style={{ margin: 0 }}>Password *</label>
                 <button
                   type="button"
                   onClick={() => setShowForgotModal(true)}
@@ -136,15 +188,23 @@ export default function LoginPage() {
                   Forgot password?
                 </button>
               </div>
-              <input
+              <PasswordInput
                 id="password"
-                type="password"
                 className="form-input"
                 value={form.password}
-                onChange={e => setForm(p => ({ ...p, password: e.target.value }))}
+                onChange={e => {
+                  const val = e.target.value;
+                  setForm(p => ({ ...p, password: val }));
+                  if (fieldErrors.password) setFieldErrors(p => ({ ...p, password: validateLoginField('password', val) }));
+                }}
+                onBlur={() => handleBlur('password')}
                 required
+                aria-required="true"
+                aria-invalid={Boolean(fieldErrors.password)}
+                aria-describedby={fieldErrors.password ? 'password-error' : undefined}
                 autoComplete="current-password"
               />
+              <InlineFieldError id="password-error" error={fieldErrors.password} />
             </div>
 
             <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-4)', fontSize: 'var(--text-sm)', cursor: 'pointer' }}>
@@ -158,51 +218,12 @@ export default function LoginPage() {
             <button
               type="submit"
               className="btn btn-primary btn-lg btn-full"
-              disabled={loading || !form.email || !form.password}
+              disabled={loading}
               id="login-submit-btn"
             >
               {loading ? 'Signing in…' : 'Sign In'}
             </button>
           </form>
-
-          {/* 7-Role Instant Demo Switcher */}
-          <div style={{
-            marginTop: 'var(--space-6)',
-            padding: 'var(--space-4)',
-            background: 'var(--color-surface)',
-            borderRadius: 'var(--radius-lg)',
-            border: '1px solid var(--color-border)'
-          }}>
-            <p style={{ fontSize: 'var(--text-xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-text-muted)', marginBottom: 'var(--space-3)' }}>
-              ⚡ 1-Click Demo Login (All 7 System Roles — Section B)
-            </p>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-2)' }}>
-              {DEMO_ROLES.map(d => (
-                <button
-                  key={d.email}
-                  type="button"
-                  disabled={loading}
-                  onClick={() => {
-                    setForm({ email: d.email, password: d.pass });
-                    performLogin(d.email, d.pass);
-                  }}
-                  style={{
-                    textAlign: 'left',
-                    padding: '8px 10px',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1px solid var(--color-border)',
-                    background: 'var(--color-bg)',
-                    cursor: 'pointer',
-                    fontSize: '11px',
-                    transition: 'all 0.15s'
-                  }}
-                >
-                  <div style={{ fontWeight: 700, color: d.badge }}>{d.role}</div>
-                  <div style={{ color: 'var(--color-text-muted)', fontSize: '10px' }}>{d.email}</div>
-                </button>
-              ))}
-            </div>
-          </div>
 
           <p style={{ textAlign: 'center', marginTop: 'var(--space-5)', fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
             New to STRIDERA?{' '}
@@ -251,7 +272,7 @@ export default function LoginPage() {
               Enter your registered email and new password to reset your account credentials.
             </p>
             {recoveryMsg && (
-              <div style={{
+              <div role="alert" style={{
                 padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-4)',
                 fontSize: 'var(--text-xs)', fontWeight: 600,
                 background: recoveryMsg.type === 'success' ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
@@ -260,32 +281,59 @@ export default function LoginPage() {
                 {recoveryMsg.text}
               </div>
             )}
-            <form onSubmit={handlePasswordRecovery}>
+            <form onSubmit={handlePasswordRecovery} noValidate>
               <div className="form-group">
-                <label className="form-label">Registered Email</label>
+                <label className="form-label" htmlFor="rec-email">Registered Email *</label>
                 <input
+                  id="rec-email"
                   type="email"
                   className="form-input"
                   value={recoveryEmail}
                   onChange={e => setRecoveryEmail(e.target.value)}
-                  placeholder="demo@stridera.ph"
+                  placeholder="name@gmail.com"
+                  autoComplete="email"
                   required
+                  aria-required="true"
+                  aria-invalid={Boolean(recoveryErrors.email)}
+                  aria-describedby={recoveryErrors.email ? 'rec-email-err' : undefined}
                 />
+                <InlineFieldError id="rec-email-err" error={recoveryErrors.email} />
               </div>
               <div className="form-group">
-                <label className="form-label">New Password (min 8 chars)</label>
-                <input
-                  type="password"
+                <label className="form-label" htmlFor="rec-pass">New Password <span className="form-optional">(optional)</span></label>
+                <PasswordInput
+                  id="rec-pass"
                   className="form-input"
+                  toggleLabel="new password"
                   value={recoveryNewPass}
                   onChange={e => setRecoveryNewPass(e.target.value)}
-                  placeholder="Enter new password"
-                  minLength={8}
-                  required
+                  placeholder="Min 8 chars, 1 letter & 1 number"
+                  autoComplete="new-password"
+                  aria-invalid={Boolean(recoveryErrors.newPassword)}
+                  aria-describedby={recoveryErrors.newPassword ? 'rec-pass-err' : undefined}
                 />
+                <InlineFieldError id="rec-pass-err" error={recoveryErrors.newPassword} />
               </div>
+              {recoveryNewPass && (
+                <div className="form-group">
+                  <label className="form-label" htmlFor="rec-confirm">Confirm New Password *</label>
+                  <PasswordInput
+                    id="rec-confirm"
+                    className="form-input"
+                    toggleLabel="confirm password"
+                    value={recoveryConfirmPass}
+                    onChange={e => setRecoveryConfirmPass(e.target.value)}
+                    autoComplete="new-password"
+                    required
+                    aria-required="true"
+                    aria-invalid={Boolean(recoveryErrors.confirmPassword)}
+                    aria-describedby={recoveryErrors.confirmPassword ? 'rec-confirm-err' : undefined}
+                  />
+                  <InlineFieldError id="rec-confirm-err" error={recoveryErrors.confirmPassword} />
+                </div>
+              )}
               <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
-                <button type="button" className="btn btn-ghost" onClick={() => { setShowForgotModal(false); setRecoveryMsg(null); }}>
+                <button type="button" className="btn btn-ghost" onClick={() => { setShowForgotModal(false); setRecoveryMsg(null); setRecoveryErrors({}); }}>
                   Close
                 </button>
                 <button type="submit" className="btn btn-primary">
