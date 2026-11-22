@@ -1,12 +1,31 @@
 // STRIDERA — Backend Entry Point
 require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
+const { execSync } = require('child_process');
+
+// Auto-sync Prisma Client if prisma/schema.prisma changed (e.g. after git pull on VM)
+(function ensurePrismaClientSynced() {
+  try {
+    const srcSchemaPath = path.join(__dirname, 'prisma', 'schema.prisma');
+    const genSchemaPath = path.join(__dirname, 'node_modules', '.prisma', 'client', 'schema.prisma');
+    const srcSchema = fs.existsSync(srcSchemaPath) ? fs.readFileSync(srcSchemaPath, 'utf8').replace(/\r\n/g, '\n').trim() : '';
+    const genSchema = fs.existsSync(genSchemaPath) ? fs.readFileSync(genSchemaPath, 'utf8').replace(/\r\n/g, '\n').trim() : '';
+    if (srcSchema && srcSchema !== genSchema) {
+      console.log('🔄 Prisma schema updated — running `npx prisma generate` automatically...');
+      execSync('npx prisma generate', { cwd: __dirname, stdio: 'inherit' });
+    }
+  } catch (err) {
+    console.warn('Prisma auto-generate warning:', err.message);
+  }
+})();
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const cookieParser = require('cookie-parser');
 const compression = require('compression');
-const path = require('path');
 
 const authRoutes = require('./src/routes/auth.routes');
 const productRoutes = require('./src/routes/product.routes');
@@ -106,6 +125,37 @@ async function ensureDb() {
     console.log('🔄 Starting embedded PGlite PostgreSQL database on 127.0.0.1:5432...');
     const { start: startDb } = require('./db-server');
     await startDb();
+  }
+
+  // Always ensure additive columns from migrations 006 & 008 exist even if DB was already running
+  try {
+    const prisma = require('./src/lib/prisma');
+    const additiveStatements = [
+      'ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "shipping_region" TEXT',
+      'ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "shipping_barangay" TEXT',
+      'ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "shipping_region_code" TEXT',
+      'ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "shipping_province_code" TEXT',
+      'ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "shipping_city_code" TEXT',
+      'ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "shipping_barangay_code" TEXT',
+      'ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "shipping_address_source" TEXT NOT NULL DEFAULT \'MANUAL\'',
+      'ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "estimated_delivery_start" TEXT',
+      'ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "estimated_delivery_end" TEXT',
+      'ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "delivery_zone" TEXT',
+      'ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "delivery_schedule_source" TEXT NOT NULL DEFAULT \'UNAVAILABLE\'',
+      'ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "delivery_holidays_observed" JSONB',
+      'ALTER TABLE "addresses" ADD COLUMN IF NOT EXISTS "region" TEXT',
+      'ALTER TABLE "addresses" ADD COLUMN IF NOT EXISTS "barangay" TEXT',
+      'ALTER TABLE "addresses" ADD COLUMN IF NOT EXISTS "region_code" TEXT',
+      'ALTER TABLE "addresses" ADD COLUMN IF NOT EXISTS "province_code" TEXT',
+      'ALTER TABLE "addresses" ADD COLUMN IF NOT EXISTS "city_code" TEXT',
+      'ALTER TABLE "addresses" ADD COLUMN IF NOT EXISTS "barangay_code" TEXT',
+      'ALTER TABLE "addresses" ADD COLUMN IF NOT EXISTS "address_source" TEXT NOT NULL DEFAULT \'MANUAL\''
+    ];
+    for (const stmt of additiveStatements) {
+      await prisma.$executeRawUnsafe(stmt);
+    }
+  } catch (err) {
+    console.warn('Additive schema sync warning:', err.message);
   }
 }
 
