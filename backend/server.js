@@ -154,6 +154,17 @@ async function ensureDb() {
     for (const stmt of additiveStatements) {
       await prisma.$executeRawUnsafe(stmt);
     }
+
+    // Auto-seed on fresh/empty database so all 7 demo accounts and products are ready immediately
+    const userCount = await prisma.user.count();
+    if (userCount === 0) {
+      const seedPath = path.join(__dirname, '../database/seeds/seed.js');
+      if (fs.existsSync(seedPath)) {
+        console.log('🌱 Empty database detected — seeding 7 roles, brands, and products...');
+        const { execFileSync } = require('child_process');
+        execFileSync(process.execPath, [seedPath], { cwd: __dirname, stdio: 'inherit' });
+      }
+    }
   } catch (err) {
     console.warn('Additive schema sync warning:', err.message);
   }
