@@ -155,14 +155,21 @@ async function ensureDb() {
       await prisma.$executeRawUnsafe(stmt);
     }
 
-    // Auto-seed on fresh/empty database so all 7 demo accounts and products are ready immediately
+    // Auto-seed on fresh/empty database using async spawn (never execFileSync, which would block PGLiteSocketServer's event loop)
     const userCount = await prisma.user.count();
     if (userCount === 0) {
       const seedPath = path.join(__dirname, '../database/seeds/seed.js');
       if (fs.existsSync(seedPath)) {
         console.log('🌱 Empty database detected — seeding 7 roles, brands, and products...');
-        const { execFileSync } = require('child_process');
-        execFileSync(process.execPath, [seedPath], { cwd: __dirname, stdio: 'inherit' });
+        const { spawn } = require('child_process');
+        await new Promise((resolve, reject) => {
+          const child = spawn(process.execPath, [seedPath], { cwd: __dirname, stdio: 'inherit' });
+          child.on('exit', (code) => {
+            if (code === 0) resolve();
+            else reject(new Error(`Seed process exited with code ${code}`));
+          });
+          child.on('error', reject);
+        });
       }
     }
   } catch (err) {
